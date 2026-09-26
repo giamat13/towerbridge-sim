@@ -154,6 +154,8 @@ button:focus-visible, #lever:focus-visible { outline: 3px solid var(--blue); out
   border: 2px solid #7a1f1f; transform: rotate(-3deg); opacity: 0; transition: opacity .3s, transform .3s;
 }
 .record-badge.show { opacity: .85; }
+.card-buttons { display: flex; justify-content: center; gap: 18px; flex-wrap: wrap; margin-top: 20px; }
+.card-buttons .stamp { margin-top: 0; }
 @media (hover: hover) and (pointer: fine) { .keys { display: block; } }
 .stamp {
   display: inline-block; margin-top: 20px; padding: 12px 54px 10px; font-size: 46px; line-height: 1; font-weight: 400;
@@ -363,7 +365,10 @@ kbd { position: absolute; right: 8px; bottom: 6px; font: 600 14px/1 var(--serif)
         <div><b id="wTraffic">0%</b><span>PEAK TRAFFIC</span></div>
       </div>
       <div class="record-badge" id="wRecord">NEW RECORD!</div>
-      <button class="stamp dark" id="btnRestart">RESTART</button>
+      <div class="card-buttons">
+        <button class="stamp" id="btnContinue">CONTINUE</button>
+        <button class="stamp dark" id="btnRestart">RESTART</button>
+      </div>
     </div></div>
 
     <div class="card" id="cardLose" style="--rot:-.5deg"><div class="paper">
@@ -643,7 +648,7 @@ function generateShipSchedule() {
 function createState() {
   return {
     phase: 'title',            // title | playing | paused | failing | over | won
-    elapsed: 0,
+    elapsed: 0, continuing: false,
     pressure: CONFIG.pressureStart, coalBurns: [], overTime: 0, lowTime: 0, idealTime: 0,
     oil: CONFIG.oilStart, oilTank: rand(CONFIG.oilTankMin, CONFIG.oilTankMax), dryTime: 0,
     engineSpeed: 0, crank: 0, pumpEff: 0,
@@ -772,6 +777,7 @@ function stepGame(S, dt) {
   if (S.accumHint > 0) S.accumHint -= dt;
 
   // 5. Ships, spawned from the pre-generated schedule.
+  if (S.continuing) extendShipSchedule(S);
   const sh = S.ship;
   if (!sh) {
     if (S.nextShipIdx < S.shipSchedule.length && S.elapsed >= S.shipSchedule[S.nextShipIdx].t) {
@@ -819,11 +825,21 @@ function stepGame(S, dt) {
   S.peakTraffic = Math.max(S.peakTraffic, S.traffic);
   if (S.traffic >= 1) return fail(S, 'gridlock');
 
-  // 7. Survived the shift?
-  if (S.elapsed >= C.gameDuration) {
+  // 7. Survived the shift? Once the player has chosen to carry on past the first finish,
+  // there's no second one — the shift just keeps going until something goes wrong.
+  if (!S.continuing && S.elapsed >= C.gameDuration) {
     S.elapsed = C.gameDuration;
     S.phase = 'won';
     emit('win');
+  }
+}
+// A few more ships to keep an extended shift going, at the hardest tuned pace.
+function extendShipSchedule(S) {
+  const C = CONFIG;
+  while (S.shipSchedule.length - S.nextShipIdx < 2) {
+    const last = S.shipSchedule.length ? S.shipSchedule[S.shipSchedule.length - 1].t : S.elapsed;
+    const t = Math.max(last, S.elapsed) + rand(C.shipIntervalMin, C.shipIntervalMax) * C.shipIntervalRamp;
+    S.shipSchedule.push({ t, kind: pickShipKind(true) });
   }
 }
 // ==== CORE END ====
@@ -1113,6 +1129,7 @@ const V = {
   leverAngle: -48, leverDrag: null,
   cars: [], peds: [], carT: 0, pedT: 0,
   lastSecond: -1, failShownAt: 0,
+  shiplogIdx: [],
 };
 const P = []; // particles
 
@@ -2199,8 +2216,11 @@ function updateSigns() {
 }
 
 function updateHud() {
-  // flip clock
-  const left = S.phase === 'title' ? CONFIG.gameDuration : Math.max(0, CONFIG.gameDuration - S.elapsed);
+  // flip clock: counts down as usual, but once the player has chosen to carry on past
+  // the first finish, there's no more end to count down to, so it counts elapsed time up.
+  const left = S.phase === 'title' ? CONFIG.gameDuration
+    : S.continuing ? S.elapsed
+    : Math.max(0, CONFIG.gameDuration - S.elapsed);
   const secs = Math.ceil(left - 1e-6);
   if (secs !== V.lastSecond) {
     const txt = `${String(Math.floor(secs / 60)).padStart(2, '0')}${String(secs % 60).padStart(2, '0')}`;
@@ -2209,9 +2229,9 @@ function updateHud() {
       d.classList.remove('flip'); void d.offsetWidth; d.classList.add('flip');
       setTimeout(() => { d.textContent = txt[i]; }, 110);
     });
-    if (S.phase === 'playing' && V.lastSecond !== -1) Sfx.clack(secs <= 10);
+    if (S.phase === 'playing' && V.lastSecond !== -1) Sfx.clack(!S.continuing && secs <= 10);
     V.lastSecond = secs;
-    el.clock.classList.toggle('urgent', S.phase !== 'title' && secs <= 10);
+    el.clock.classList.toggle('urgent', !S.continuing && S.phase !== 'title' && secs <= 10);
   }
   // traffic meter
   el.tfill.style.width = `${(S.traffic * 100).toFixed(1)}%`;
@@ -2285,20 +2305,32 @@ function shipReachedBridge(origIdx) {
   if (origIdx < S.shipCount - 1) return true;
   return !(S.ship && S.ship.state === 'approach');
 }
+function appendShipLogEntry(entry, origIdx) {
+  const mark = SHIP_KINDS[entry.kind].urgent ? ' !' : SHIP_KINDS[entry.kind].grand ? ' ★' : '';
+  const span = document.createElement('span');
+  span.innerHTML = `<b></b>${mark}`;
+  el.shiplogTimes.appendChild(span);
+  V.shiplogIdx.push(origIdx);
+}
 function buildShipLog() {
   // Small boats never need the bridge, so they don't appear on this list at all.
   el.shiplogTimes.innerHTML = '';
   V.shiplogIdx = [];
-  S.shipSchedule.forEach((entry, i) => {
-    if (!SHIP_KINDS[entry.kind].needsLift) return;
-    const mark = SHIP_KINDS[entry.kind].urgent ? ' !' : SHIP_KINDS[entry.kind].grand ? ' ★' : '';
-    const span = document.createElement('span');
-    span.innerHTML = `<b></b>${mark}`;
-    el.shiplogTimes.appendChild(span);
-    V.shiplogIdx.push(i);
-  });
+  S.shipSchedule.forEach((entry, i) => { if (SHIP_KINDS[entry.kind].needsLift) appendShipLogEntry(entry, i); });
 }
 function updateShipLog() {
+  if (S.phase === 'title') return; // stay empty until a game actually starts
+  // Pick up any ships added to the schedule since the list was last extended
+  // (an extended shift keeps generating more as it goes).
+  for (let i = (V.shiplogIdx[V.shiplogIdx.length - 1] ?? -1) + 1; i < S.shipSchedule.length; i++) {
+    const entry = S.shipSchedule[i];
+    if (SHIP_KINDS[entry.kind].needsLift) appendShipLogEntry(entry, i);
+  }
+  // Don't let the strip grow without bound during an extended shift.
+  while (V.shiplogIdx.length > 6 && shipReachedBridge(V.shiplogIdx[0])) {
+    el.shiplogTimes.removeChild(el.shiplogTimes.firstChild);
+    V.shiplogIdx.shift();
+  }
   const kids = el.shiplogTimes.children;
   let nextSet = false;
   for (let i = 0; i < kids.length; i++) {
@@ -2386,6 +2418,16 @@ function startGame() {
   document.activeElement && document.activeElement.blur && document.activeElement.blur();
   Sfx.lever(false);
   say('Game started. Keep everything running for two minutes.');
+}
+
+function continueGame() {
+  if (S.phase !== 'won') return;
+  Sfx.init();
+  goFullscreenLandscape();
+  S.continuing = true;
+  S.phase = 'playing';
+  showCard(null);
+  say('Carrying on! Keep the bridge running for as long as you can.');
 }
 
 function pauseGame() {
@@ -2563,6 +2605,7 @@ bindPress(el.mute, toggleMute);
 bindPress(el.pause, togglePause);
 $('btnStart').addEventListener('click', startGame);
 $('btnRestart').addEventListener('click', startGame);
+$('btnContinue').addEventListener('click', continueGame);
 $('btnRetry').addEventListener('click', startGame);
 $('btnResume').addEventListener('click', resumeGame);
 
