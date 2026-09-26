@@ -520,29 +520,48 @@ const CONFIG = {
 const GEOM = {
   shipSpawnX: 1700,   // just off the right edge
   shipDangerX: 1374,  // foremast meets the tip of the lowered leaf
-  shipClearX: 1012,   // mizzen has slipped behind the pier: ship has passed
-  shipGoneX: 976,     // whole hull hidden behind the pier
+  shipClearX: 954,    // the whole ship, spanker included, has slipped behind the pier
+  shipGoneX: 950,
   // Bascule geometry, matching the renderer, used to test whether the raised leaf's
   // tip actually reaches the ship rather than just checking "fully open or not".
   pivotX: 1080, pivotY: 400, leafLen: 290, leafMaxDeg: 78,
-  leafTipRadius: 14,  // how close the tip must get to actually clip the ship
-  hazard: { xBack: -100, xFront: 175, yTop: -240, yBottom: 18 }, // ship's hull+rigging box, relative to (shipX, waterY)
-  waterY: 474,
+  pierFace: 1130,     // anything left of this is hidden inside the pier
+  waterY: 474,        // the ship's drawing origin (foremast foot at the waterline)
+  // Outline of the ship as drawn (relative to the foremast at the waterline): bowsprit,
+  // forestay up to the foremast top, mast tops, spanker, stern, keel and bow.
+  shipOutline: [[-98, -48], [-2, -214], [46, -216], [62, -234], [78, -216], [118, -188],
+    [166, -152], [174, -40], [154, -12], [120, 16], [-20, 16], [-58, -28]],
 };
 const smoothStep = (t) => t * t * (3 - 2 * t);
-// Where the tip of the bascule leaf currently is, for a given raise fraction (0-1).
-function leafTip(bridgeFrac) {
-  const a = (GEOM.leafMaxDeg * Math.PI / 180) * smoothStep(clamp(bridgeFrac, 0, 1));
-  return { x: GEOM.pivotX + GEOM.leafLen * Math.cos(a), y: GEOM.pivotY - GEOM.leafLen * Math.sin(a) };
+// Points around the bascule leaf's outline (railing on top, girder underneath), in the
+// leaf's own frame, matching what the renderer draws.
+const LEAF_POINTS = (() => {
+  const pts = [];
+  const under = (u) => (u < 40 ? lerp(20, 16, u / 40) : lerp(16, -1, (u - 40) / (GEOM.leafLen - 40)));
+  for (let u = -14; u <= GEOM.leafLen; u += 6) { pts.push([Math.min(u, GEOM.leafLen - 4), -18]); pts.push([u, under(u)]); }
+  pts.push([GEOM.leafLen, -8]);
+  return pts;
+})();
+function pointInPolygon(x, y, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
 }
-// True only if the leaf's tip, at its current angle, actually reaches the ship's hull/rigging —
-// so a partly raised bridge is safe once the tip has swung clear, not only once it's fully vertical.
+// True only if some part of the leaf, at its current angle, is actually inside the ship's
+// outline — a partly raised bridge is fine as long as nothing on screen touches.
 function shipTouchesLeaf(shipX, bridgeFrac) {
-  const tip = leafTip(bridgeFrac);
-  const H = GEOM.hazard;
-  const nearestX = clamp(tip.x, shipX + H.xBack, shipX + H.xFront);
-  const nearestY = clamp(tip.y, GEOM.waterY + H.yTop, GEOM.waterY + H.yBottom);
-  return Math.hypot(tip.x - nearestX, tip.y - nearestY) <= GEOM.leafTipRadius;
+  const a = (GEOM.leafMaxDeg * Math.PI / 180) * smoothStep(clamp(bridgeFrac, 0, 1));
+  const c = Math.cos(-a), sn = Math.sin(-a);
+  for (const [u, v] of LEAF_POINTS) {
+    const x = GEOM.pivotX + u * c - v * sn;
+    if (x <= GEOM.pierFace) continue;
+    const y = GEOM.pivotY + u * sn + v * c;
+    if (pointInPolygon(x - shipX, y - GEOM.waterY, GEOM.shipOutline)) return true;
+  }
+  return false;
 }
 
 let emit = () => {};
@@ -711,6 +730,8 @@ function stepGame(S, dt) {
         S.passedAt = S.elapsed;
         emit('shipPassed');
       }
+    } else if (shipTouchesLeaf(sh.x, S.bridge)) {
+      sh.state = 'crashed'; return fail(S, 'collision', 'lowered');
     } else if (sh.x <= GEOM.shipGoneX) {
       S.ship = null;
       S.nextShipIn = Math.max(S.nextShipIn, C.shipMinGap);
@@ -832,9 +853,9 @@ const Sfx = (() => {
     g.gain.exponentialRampToValueAtTime(gain, t + 0.09);
     g.gain.setValueAtTime(gain, t + dur - 0.18);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    const fl = ctx.createBiquadFilter(); fl.type = 'lowpass'; fl.frequency.value = 650; fl.Q.value = 2;
+    const fl = ctx.createBiquadFilter(); fl.type = 'lowpass'; fl.frequency.value = 1600; fl.Q.value = 1.5;
     fl.connect(g); g.connect(master);
-    [98, 98.7, 147].forEach((f) => {
+    [98, 196, 197.2, 294, 392].forEach((f) => {
       const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f * pitch;
       o.connect(fl); o.start(t); o.stop(t + dur + 0.05);
     });
@@ -896,7 +917,7 @@ const Sfx = (() => {
       noise({ f: 1500, q: 2, dur: 0.1, gain: 0.3 });
       tone({ type: 'sawtooth', f: 110, dur: 0.35, gain: 0.08, delay: 0.1, lp: 600 });
     },
-    horn() { hornBlast(0, 1.3, 1, 0.24); hornBlast(1.45, 0.6, 1, 0.22); },
+    horn() { hornBlast(0, 1.3, 1, 0.3); hornBlast(1.45, 0.6, 1, 0.28); },
     toot() { hornBlast(0, 0.35, 1.26, 0.16); hornBlast(0.45, 0.35, 1.26, 0.16); },
     clack(loud) {
       noise({ f: 2600, q: 3, dur: 0.03, gain: loud ? 0.3 : 0.12 });
