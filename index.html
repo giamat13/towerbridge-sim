@@ -2272,26 +2272,45 @@ function updateBestLine() {
   node.classList.add('show');
 }
 
+// How long after sighting a scheduled ship takes to reach the bridge — the same formula
+// stepGame uses at the moment it actually spawns, so the countdown matches exactly.
+function approachDurationFor(entry) {
+  const k = clamp(entry.t / CONFIG.gameDuration, 0, 1);
+  return lerp(CONFIG.approachTimeStart, CONFIG.approachTimeEnd, k) * SHIP_KINDS[entry.kind].approachMul;
+}
+// True once the ship at this schedule index has actually reached the bridge (left its
+// 'approach' state) — not merely been sighted.
+function shipReachedBridge(origIdx) {
+  if (origIdx >= S.shipCount) return false;
+  if (origIdx < S.shipCount - 1) return true;
+  return !(S.ship && S.ship.state === 'approach');
+}
 function buildShipLog() {
-  el.shiplogTimes.innerHTML = S.shipSchedule.map((entry) => {
+  // Small boats never need the bridge, so they don't appear on this list at all.
+  el.shiplogTimes.innerHTML = '';
+  V.shiplogIdx = [];
+  S.shipSchedule.forEach((entry, i) => {
+    if (!SHIP_KINDS[entry.kind].needsLift) return;
     const mark = SHIP_KINDS[entry.kind].urgent ? ' !' : SHIP_KINDS[entry.kind].grand ? ' ★' : '';
-    return `<span data-mark="${mark}"><b></b>${mark}</span>`;
-  }).join('');
-  V.shiplogSighted = -1;
+    const span = document.createElement('span');
+    span.innerHTML = `<b></b>${mark}`;
+    el.shiplogTimes.appendChild(span);
+    V.shiplogIdx.push(i);
+  });
 }
 function updateShipLog() {
   const kids = el.shiplogTimes.children;
+  let nextSet = false;
   for (let i = 0; i < kids.length; i++) {
-    const arrived = i < S.shipCount;
-    const b = kids[i].firstChild;
-    b.textContent = arrived ? '–' : fmtTime(Math.max(0, S.shipSchedule[i].t - S.elapsed));
+    const origIdx = V.shiplogIdx[i];
+    const entry = S.shipSchedule[origIdx];
+    const reached = shipReachedBridge(origIdx);
+    kids[i].firstChild.textContent = reached ? '–' : fmtTime(Math.max(0, entry.t + approachDurationFor(entry) - S.elapsed));
+    kids[i].classList.toggle('done', reached);
+    const isNext = !reached && !nextSet;
+    kids[i].classList.toggle('next', isNext);
+    if (isNext) nextSet = true;
   }
-  if (V.shiplogSighted === S.shipCount) return;
-  V.shiplogSighted = S.shipCount;
-  [...kids].forEach((el2, i) => {
-    el2.classList.toggle('done', i < S.shipCount);
-    el2.classList.toggle('next', i === S.shipCount);
-  });
 }
 
 const FAILS = {
