@@ -185,6 +185,16 @@ button:focus-visible, #lever:focus-visible { outline: 3px solid var(--blue); out
 #btnOil { left: 552px; width: 380px; }
 #btnCoal .s { font-size: 52px; }
 #btnCoal .l { font-size: 80px; }
+#btnCoal { cursor: grab; touch-action: none; }
+#btnCoal.dragging { cursor: grabbing; }
+#btnCoal.dragging .glyph { opacity: .25; }
+#btnCoal .hint { font-size: 19px; letter-spacing: .5px; color: #8fa0b8; margin-top: 8px; }
+#coalGhost { position: absolute; left: 0; top: 0; width: 120px; height: 85px; pointer-events: none; z-index: 30; opacity: 0; transition: opacity .12s; filter: drop-shadow(0 8px 6px rgba(0,0,0,.45)); }
+#coalGhost.show { opacity: 1; }
+#coalTarget { position: absolute; left: 190px; top: 452px; width: 120px; height: 120px; border-radius: 50%; border: 4px dashed rgba(214,120,30,.85); pointer-events: none; z-index: 6; opacity: 0; transition: opacity .15s, transform .15s, box-shadow .15s; }
+#coalTarget.show { opacity: 1; animation: ring 1s ease-in-out infinite; }
+#coalTarget.hot { border-style: solid; transform: scale(1.14); box-shadow: 0 0 26px 8px rgba(255,150,40,.55); animation: none; }
+@keyframes ring { 50% { transform: scale(1.07); } }
 #btnOil .l { font-size: 98px; }
 #btnOil .s { font-size: 23px; letter-spacing: .5px; }
 kbd { position: absolute; right: 8px; bottom: 6px; font: 600 14px/1 var(--serif); color: #8d8d89; border: 1px solid #555; border-radius: 4px; padding: 3px 7px; display: none; }
@@ -257,6 +267,7 @@ kbd { position: absolute; right: 8px; bottom: 6px; font: 600 14px/1 var(--serif)
       </div>
     </div></div>
 
+    <div id="coalTarget" aria-hidden="true"></div>
     <div class="card show" id="cardStart" style="--rot:-.6deg"><div class="paper">
       <div class="head">
         <svg class="engr" viewBox="0 0 230 130" aria-hidden="true">
@@ -282,7 +293,7 @@ kbd { position: absolute; right: 8px; bottom: 6px; font: 600 14px/1 var(--serif)
       </div>
       <p class="lead">TRY BEING A BRIDGE MASTER AND KEEP EVERYTHING<br>RUNNING SMOOTHLY FOR <span class="hl">2 MINUTES</span></p>
       <ol class="how">
-        <li><b>1</b><span>Shovel coal to keep the needle between 100 and 180 – but never in the red.</span></li>
+        <li><b>1</b><span>Drag coal up into the boiler to keep the needle between 100 and 180 – never in the red.</span></li>
         <li><b>2</b><span>Oil the machinery before the glass lubricator runs dry.</span></li>
         <li><b>3</b><span>Wait for the accumulator weights to rise past the LIFT mark.</span></li>
         <li><b>4</b><span>Raise the bridge for each ship, then lower it again for the traffic.</span></li>
@@ -328,7 +339,7 @@ kbd { position: absolute; right: 8px; bottom: 6px; font: 600 14px/1 var(--serif)
   </div>
 
   <div id="panel">
-    <button class="ctl" id="btnCoal" aria-label="Shovel coal (key C)">
+    <button class="ctl" id="btnCoal" aria-label="Shovel coal: drag it up into the boiler (key C)">
       <span class="ic">
         <svg class="arrow" viewBox="0 0 78 62" aria-hidden="true"><polygon points="39,0 78,34 56,34 56,62 22,62 22,34 0,34"/></svg>
         <svg class="glyph" viewBox="0 0 176 124" aria-hidden="true">
@@ -340,7 +351,7 @@ kbd { position: absolute; right: 8px; bottom: 6px; font: 600 14px/1 var(--serif)
           <path d="M24 102l8-7 9 3 2 8-8 5-9-2zM42 93l7-6 8 2 1 7-7 4-8-2zM34 110l6-4 7 2-1 6-7 2z" fill="#1a1a1a"/>
         </svg>
       </span>
-      <span class="txt"><span class="s">SHOVEL</span><span class="l">COAL</span></span>
+      <span class="txt"><span class="s">SHOVEL</span><span class="l">COAL</span><span class="hint">DRAG UP INTO THE BOILER</span></span>
       <kbd>C</kbd>
     </button>
     <button class="ctl" id="btnOil" aria-label="Oil the machinery (key O)">
@@ -401,6 +412,7 @@ kbd { position: absolute; right: 8px; bottom: 6px; font: 600 14px/1 var(--serif)
     </div>
   </div>
 </div>
+<div id="coalGhost" aria-hidden="true" hidden></div>
 <div id="rotate" role="alertdialog" aria-label="Rotate your device">
   <svg class="phone" viewBox="0 0 110 110" aria-hidden="true">
     <rect x="33" y="10" width="44" height="90" rx="8" fill="none" stroke="#efefec" stroke-width="5"/>
@@ -483,8 +495,8 @@ const CONFIG = {
   shipMinGap: 6,              // seconds of calm after a ship leaves
 
   // Road traffic (0–1)
-  trafficFill: 0.019,         // per second while the bridge is not down
-  trafficDrain: 0.05,         // per second while it is down
+  trafficFill: 0.014,         // per second while the bridge is not down
+  trafficDrain: 0.06,         // per second while it is down
   trafficWarn: 0.7,
 
   // Star rating: share of time in the ideal pressure range
@@ -953,7 +965,7 @@ let S = createState();
 const V = {
   s: 1, k: 0, t: 0,
   pressureShown: 0, oilShown: CONFIG.oilStart, accShown: CONFIG.accumStart, bridgeShown: 0,
-  fire: 0.1, flow: { steam: 0, feed: 0, pump: 0, pier: 0 },
+  coalHint: 0, fire: 0.1, flow: { steam: 0, feed: 0, pump: 0, pier: 0 },
   stoke: 0, sparkAt: -1, drops: [],
   shake: 0, leafShake: 0, crashT: 0,
   stopShow: 0, puffT: 0, halfRevs: 0,
@@ -1447,20 +1459,20 @@ function updateTraffic(dt) {
   V.carT -= dt; V.pedT -= dt;
   if (V.carT <= 0) {
     let spawn = true, next;
-    if (!closed) next = busy ? rand(0.9, 1.5) : rand(2.2, 3.6);
+    if (!closed) next = busy ? rand(1.6, 2.4) : rand(3.4, 5.4);
     else {
       const queued = V.cars.filter((v) => v.x + v.len <= STOP_X + 1).length;
-      spawn = queued < 2 + Math.round(S.traffic * 10);
-      next = 0.8;
+      spawn = queued < 1 + Math.round(S.traffic * 8);
+      next = 1.2;
     }
     if (spawn && entranceClear(V.cars, 14)) { V.cars.push(makeCar()); V.carT = next; } else V.carT = 0.4;
   }
   if (V.pedT <= 0) {
     let spawn = true, next;
-    if (!closed) next = rand(2.8, 5.5);
+    if (!closed) next = rand(4, 7.5);
     else {
       const queued = V.peds.filter((v) => v.x + v.len <= STOP_X + 1).length;
-      spawn = queued < 1 + Math.round(S.traffic * 7);
+      spawn = queued < 1 + Math.round(S.traffic * 4);
       next = 1.2;
     }
     if (spawn && entranceClear(V.peds, 8)) { V.peds.push(makePed()); V.pedT = next; } else V.pedT = 0.5;
@@ -1468,8 +1480,8 @@ function updateTraffic(dt) {
 }
 
 function populateRoad() {
-  [40, 250, 520, 760, 980, 1220].forEach((x) => V.cars.push(makeCar(x)));
-  [120, 420, 640, 900].forEach((x) => V.peds.push(makePed(x)));
+  [90, 470, 900, 1230].forEach((x) => V.cars.push(makeCar(x)));
+  [260, 700].forEach((x) => V.peds.push(makePed(x)));
 }
 
 function wheel(g, cx, cy, r, rot) {
@@ -1943,7 +1955,8 @@ function updateSigns() {
   const C = CONFIG, sg = el.signs;
   const live = S.phase === 'playing';
   const p = S.pressure;
-  if (live && p > C.pressureHigh) setSign(sg.boiler, true, 'PRESSURE TOO HIGH', 'STOP STOKING!', true, p > C.pressureBurst);
+  if (live && V.coalHint > 0) setSign(sg.boiler, true, 'DRAG THE COAL!', 'SWIPE THE SHOVEL UP INTO THE BOILER', false, false);
+  else if (live && p > C.pressureHigh) setSign(sg.boiler, true, 'PRESSURE TOO HIGH', 'STOP STOKING!', true, p > C.pressureBurst);
   else if (live && p < C.pressureDead) setSign(sg.boiler, true, 'THE FIRES ARE DYING', 'STOKE NOW OR THE ENGINES WILL STOP!', true, true);
   else if (live && p < C.pressureCool) setSign(sg.boiler, true, 'BOILERS ARE COOLING', "KEEP STOKING OR YOU'LL RUN OUT OF STEAM!", false, false);
   else setSign(sg.boiler, false);
@@ -2165,7 +2178,47 @@ function bindPress(node, fn) {
   node.addEventListener('pointerdown', (e) => { if (e.button > 0) return; e.preventDefault(); fn(); });
   node.addEventListener('click', (e) => { if (e.detail === 0) fn(); }); // keyboard activation
 }
-bindPress(el.coal, doCoal);
+el.coal.addEventListener('click', (e) => { if (e.detail === 0) doCoal(); }); // keyboard activation
+
+// Coal is dragged from the shovel up into the boiler room; a plain tap only shows a hint.
+const coalGhost = $('coalGhost'), coalTarget = $('coalTarget');
+coalGhost.hidden = false;
+coalGhost.innerHTML = el.coal.querySelector('.glyph').outerHTML.replace('class="glyph"', 'width="120" height="85"');
+stage.appendChild(coalGhost);
+let coalDrag = null;
+function toStage(e) {
+  const r = stage.getBoundingClientRect();
+  return { x: (e.clientX - r.left) / V.s, y: (e.clientY - r.top) / V.s };
+}
+const inBoiler = (p) => p.x < 340 && p.y > 300 && p.y < 580;
+function moveGhost(p) { coalGhost.style.transform = `translate(${(p.x - 30).toFixed(1)}px, ${(p.y - 70).toFixed(1)}px)`; }
+el.coal.addEventListener('pointerdown', (e) => {
+  if (e.button > 0) return;
+  e.preventDefault();
+  Sfx.init();
+  if (S.phase !== 'playing') { press(el.coal); return; }
+  try { el.coal.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+  const p = toStage(e);
+  coalDrag = { id: e.pointerId, x0: p.x, y0: p.y };
+  moveGhost(p);
+  coalGhost.classList.add('show'); coalTarget.classList.add('show'); el.coal.classList.add('dragging');
+});
+el.coal.addEventListener('pointermove', (e) => {
+  if (!coalDrag || e.pointerId !== coalDrag.id) return;
+  const p = toStage(e);
+  moveGhost(p);
+  coalTarget.classList.toggle('hot', inBoiler(p));
+});
+function endCoalDrag(e, dropped) {
+  if (!coalDrag || e.pointerId !== coalDrag.id) return;
+  const p = toStage(e);
+  coalDrag = null;
+  coalGhost.classList.remove('show'); coalTarget.classList.remove('show', 'hot'); el.coal.classList.remove('dragging');
+  if (dropped && inBoiler(p)) doCoal();
+  else if (dropped) V.coalHint = 2.5;
+}
+el.coal.addEventListener('pointerup', (e) => endCoalDrag(e, true));
+el.coal.addEventListener('pointercancel', (e) => endCoalDrag(e, false));
 bindPress(el.oil, doOil);
 bindPress(el.lblLower, () => doLever(false));
 bindPress(el.lblRaise, () => doLever(true));
@@ -2293,6 +2346,7 @@ function update(dt) {
   const half = Math.floor(S.crank / Math.PI);
   if (half !== V.halfRevs) { if (S.phase === 'playing') Sfx.chuff(revs); V.halfRevs = half; }
   if (V.stoke > 0) V.stoke = Math.max(0, V.stoke - dt);
+  if (V.coalHint > 0) V.coalHint -= dt;
   if (V.sparkAt > 0 && V.t >= V.sparkAt) { sparks(250, 516, 16); V.sparkAt = -1; }
   if (S.phase === 'playing' && S.pressure > C.pressureHigh) {
     V.puffT -= dt;
