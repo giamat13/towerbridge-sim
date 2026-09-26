@@ -119,6 +119,17 @@ button:focus-visible, #lever:focus-visible { outline: 3px solid var(--blue); out
 #tmeter .ships { font-size: 17px; white-space: nowrap; }
 #tmeter .ships b { font-size: 22px; font-weight: 400; }
 
+/* ---------- ship schedule ---------- */
+#shiplog { position: absolute; left: 980px; top: 14px; width: 340px; height: 56px; z-index: 4; filter: drop-shadow(0 3px 4px rgba(0,0,0,.3)); }
+#shiplog .paper { height: 100%; display: flex; align-items: center; gap: 10px; padding: 0 15px; }
+#shiplog .lbl { font-size: 18px; letter-spacing: .5px; flex: none; }
+#shiplog .times { display: flex; align-items: baseline; gap: 8px; overflow: hidden; font: 400 18px var(--serif); color: #4a4036; }
+#shiplog .times span { white-space: nowrap; }
+#shiplog .times span::after { content: '\00b7'; margin-left: 8px; color: #a89a80; }
+#shiplog .times span:last-child::after { content: ''; }
+#shiplog .times span.done { text-decoration: line-through; opacity: .4; }
+#shiplog .times span.next { font-weight: 700; color: var(--red); }
+
 /* ---------- cards ---------- */
 .card { position: absolute; left: 50%; top: 50%; z-index: 20; display: none; filter: drop-shadow(0 12px 14px rgba(0,0,0,.45)); transform: translate(-50%, -50%) rotate(var(--rot, 0deg)); }
 .card.show { display: block; animation: cardIn .45s cubic-bezier(.2,1.4,.4,1); }
@@ -272,6 +283,11 @@ kbd { position: absolute; right: 8px; bottom: 6px; font: 600 14px/1 var(--serif)
       <div class="lbl">TRAFFIC</div>
       <div class="bar"><i class="warn"></i><i class="fill"></i></div>
       <div class="ships">SHIPS <b id="shipsN">0</b></div>
+    </div></div>
+
+    <div id="shiplog" aria-hidden="true"><div class="paper">
+      <div class="lbl">SHIPS DUE</div>
+      <div class="times" id="shiplogTimes"></div>
     </div></div>
 
     <div class="sign" id="sgBoiler" style="left:16px;top:210px;width:272px;--rot:-1.2deg"><div class="paper"><div class="t"></div><div class="b"></div></div></div>
@@ -513,7 +529,6 @@ const CONFIG = {
   approachTimeStart: 13,      // seconds from sighting to reaching the bridge
   approachTimeEnd: 10.5,
   passSpeed: 60,              // px/s once the ship is under the bridge
-  shipMinGap: 6,              // seconds of calm after a ship leaves
 
   // Road traffic (0–1)
   trafficFill: 0.014,         // per second while the bridge is not down
@@ -578,6 +593,21 @@ function shipTouchesLeaf(shipX, bridgeFrac) {
 let emit = () => {};
 function setEmitter(fn) { emit = fn; }
 
+// The elapsed-time (seconds) at which each ship will be sighted this game.
+function generateShipSchedule() {
+  const C = CONFIG;
+  const sched = [];
+  let t = rand(C.firstShipMin, C.firstShipMax);
+  for (;;) {
+    const k = clamp(t / C.gameDuration, 0, 1);
+    const approachTime = lerp(C.approachTimeStart, C.approachTimeEnd, k);
+    if (C.gameDuration - t <= approachTime + 1) break;
+    sched.push(t);
+    t += rand(C.shipIntervalMin, C.shipIntervalMax) * lerp(1, C.shipIntervalRamp, k);
+  }
+  return sched;
+}
+
 function createState() {
   return {
     phase: 'title',            // title | playing | paused | failing | over | won
@@ -588,7 +618,7 @@ function createState() {
     accum: CONFIG.accumStart, accumHint: 0,
     bridge: 0, leverUp: false, bridgeMoving: 0, stalled: false,
     ship: null, shipCount: 0, shipsPassed: 0, passedAt: -99,
-    nextShipIn: rand(CONFIG.firstShipMin, CONFIG.firstShipMax),
+    shipSchedule: generateShipSchedule(), nextShipIdx: 0,
     traffic: 0, peakTraffic: 0,
     failReason: null, failTimer: 0, failNote: null,
   };
@@ -709,15 +739,14 @@ function stepGame(S, dt) {
   }
   if (S.accumHint > 0) S.accumHint -= dt;
 
-  // 5. Ships.
-  S.nextShipIn -= dt;
+  // 5. Ships, spawned from the pre-generated schedule.
   const sh = S.ship;
   if (!sh) {
-    const T = lerp(C.approachTimeStart, C.approachTimeEnd, k);
-    if (S.nextShipIn <= 0 && C.gameDuration - S.elapsed > T + 1) {
+    if (S.nextShipIdx < S.shipSchedule.length && S.elapsed >= S.shipSchedule[S.nextShipIdx]) {
+      const T = lerp(C.approachTimeStart, C.approachTimeEnd, k);
       const dist = GEOM.shipSpawnX - GEOM.shipDangerX;
       S.ship = { id: ++S.shipCount, x: GEOM.shipSpawnX, dist, speed: dist / T, state: 'approach' };
-      S.nextShipIn = rand(C.shipIntervalMin, C.shipIntervalMax) * lerp(1, C.shipIntervalRamp, k);
+      S.nextShipIdx++;
       emit('shipSpawn');
     }
   } else if (sh.state === 'approach') {
@@ -745,7 +774,6 @@ function stepGame(S, dt) {
       sh.state = 'crashed'; return fail(S, 'collision', 'lowered');
     } else if (sh.x <= GEOM.shipGoneX) {
       S.ship = null;
-      S.nextShipIn = Math.max(S.nextShipIn, C.shipMinGap);
     }
   }
 
@@ -1989,6 +2017,7 @@ const el = {
   body: document.body,
   clock: $('clock'), digits: [...document.querySelectorAll('#clock .d')],
   tmeter: $('tmeter'), tfill: document.querySelector('#tmeter .fill'), shipsN: $('shipsN'),
+  shiplogTimes: $('shiplogTimes'),
   signs: { boiler: $('sgBoiler'), oil: $('sgOil'), accum: $('sgAccum'), traffic: $('sgTraffic'), bridge: $('sgBridge'), boat: $('sgBoat') },
   track: $('track'), trackBoat: $('trackBoat'),
   cards: { start: $('cardStart'), win: $('cardWin'), lose: $('cardLose'), pause: $('cardPause') },
@@ -2093,6 +2122,7 @@ function updateHud() {
   el.tfill.style.width = `${(S.traffic * 100).toFixed(1)}%`;
   el.tmeter.classList.toggle('hot', S.traffic > CONFIG.trafficWarn);
   if (el.shipsN.textContent !== String(S.shipsPassed)) el.shipsN.textContent = S.shipsPassed;
+  updateShipLog();
   // lever
   const target = S.leverUp ? 48 : -48;
   const shown = V.leverDrag !== null ? V.leverDrag : V.leverAngle;
@@ -2112,6 +2142,22 @@ function showCard(name) {
 }
 
 function fmtTime(s) { s = Math.floor(s); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
+
+function buildShipLog() {
+  el.shiplogTimes.innerHTML = S.shipSchedule.map((t) => {
+    const clockLeft = Math.max(0, CONFIG.gameDuration - t);
+    return `<span>${fmtTime(clockLeft)}</span>`;
+  }).join('');
+  V.shiplogSighted = -1;
+}
+function updateShipLog() {
+  if (V.shiplogSighted === S.shipCount) return;
+  V.shiplogSighted = S.shipCount;
+  [...el.shiplogTimes.children].forEach((el2, i) => {
+    el2.classList.toggle('done', i < S.shipCount);
+    el2.classList.toggle('next', i === S.shipCount);
+  });
+}
 
 const FAILS = {
   burst: { title: 'THE BOILER BURST!', sub: 'THE PRESSURE STAYED IN THE RED FOR TOO LONG', tip: 'Stoke little and often, and stop shovelling as soon as the needle nears the red.' },
@@ -2174,6 +2220,7 @@ function startGame() {
   V.drops.length = 0;
   V.stoke = 0; V.shake = 0; V.leafShake = 0; V.crashT = 0; V.sparkAt = -1;
   V.lastSecond = -1;
+  buildShipLog();
   el.body.classList.remove('idle');
   showCard(null);
   document.activeElement && document.activeElement.blur && document.activeElement.blur();
