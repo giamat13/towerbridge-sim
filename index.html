@@ -453,7 +453,7 @@ const CONFIG = {
   // Boiler & steam pressure (gauge units 0–240)
   pressureStart: 140,
   pressureMax: 255,
-  pressureDrop: 4,            // units lost per second at the start
+  pressureDrop: 3.3,          // units lost per second at the start
   pressureDropRamp: 1.25,     // drop multiplier reached at 00:00
   coalPerShovel: 15,
   coalBurnTime: 1,            // seconds for a shovelful to catch
@@ -470,8 +470,8 @@ const CONFIG = {
   // Steam engine & lubrication
   engineRevs: 1.1,            // flywheel revolutions/s at full steam
   oilStart: 0.8,
-  oilTankMin: 25,             // seconds a full lubricator lasts (randomised per fill)
-  oilTankMax: 35,
+  oilTankMin: 40,             // seconds a full lubricator lasts (randomised per fill)
+  oilTankMax: 55,
   oilRamp: 1.25,              // oil use multiplier reached at 00:00
   oilPerPress: 0.35,
   oilLow: 0.25,               // below this pump efficiency falls in proportion
@@ -508,6 +508,8 @@ const CONFIG = {
   trafficFill: 0.014,         // per second while the bridge is not down
   trafficDrain: 0.06,         // per second while it is down
   trafficWarn: 0.7,
+  trafficQueueCarsMax: 8,      // vehicles queued at 100% traffic
+  trafficQueuePedsMax: 4,      // pedestrians queued at 100% traffic
 
   // Star rating: share of time in the ideal pressure range
   starIdeal2: 0.55,
@@ -1426,9 +1428,18 @@ function makePed(x) {
 
 function roadClosed() { return S.bridge > 0 || S.leverUp || V.bridgeShown > 0.002; }
 
-function updateLane(list, gap, dt) {
+function updateLane(list, gap, dt, queueCap) {
   const closed = roadClosed();
   list.sort((a, b) => b.x - a.x);
+  // Once the bridge is physically down, a leftover jam doesn't vanish all at once: exactly as
+  // many vehicles as the TRAFFIC meter still represents stay held at the barrier, released
+  // one by one (front of the queue first) as the meter drains, so the two stay in lockstep.
+  let held = null;
+  if (!closed && queueCap) {
+    const target = Math.round(S.traffic * queueCap);
+    const zone = list.filter((v) => v.x + v.len <= STOP_X + 0.5);
+    if (target > 0 && zone.length > 0) held = new Set(zone.slice(Math.max(0, zone.length - target)));
+  }
   let leaderRear = Infinity;
   for (const v of list) {
     const front = v.x + v.len;
@@ -1437,6 +1448,8 @@ function updateLane(list, gap, dt) {
       if (front <= STOP_X + 0.5) limit = STOP_X;
       else if (front <= HEEL_X + 0.5) limit = HEEL_X;
       else v.fade = true;
+    } else if (held && held.has(v)) {
+      limit = STOP_X;
     }
     if (leaderRear !== Infinity) limit = Math.min(limit, leaderRear - gap);
     const dist = limit - front;
@@ -1462,8 +1475,8 @@ function entranceClear(list, gap) {
 }
 
 function updateTraffic(dt) {
-  updateLane(V.cars, 14, dt);
-  updateLane(V.peds, 8, dt);
+  updateLane(V.cars, 14, dt, CONFIG.trafficQueueCarsMax);
+  updateLane(V.peds, 8, dt, CONFIG.trafficQueuePedsMax);
   const closed = roadClosed();
   const busy = S.phase === 'playing' && S.traffic > 0.05;
   V.carT -= dt; V.pedT -= dt;
@@ -1472,7 +1485,7 @@ function updateTraffic(dt) {
     if (!closed) next = busy ? rand(1.6, 2.4) : rand(3.4, 5.4);
     else {
       const queued = V.cars.filter((v) => v.x + v.len <= STOP_X + 1).length;
-      spawn = queued < 1 + Math.round(S.traffic * 8);
+      spawn = queued < Math.round(S.traffic * CONFIG.trafficQueueCarsMax);
       next = 1.2;
     }
     if (spawn && entranceClear(V.cars, 14)) { V.cars.push(makeCar()); V.carT = next; } else V.carT = 0.4;
@@ -1482,7 +1495,7 @@ function updateTraffic(dt) {
     if (!closed) next = rand(4, 7.5);
     else {
       const queued = V.peds.filter((v) => v.x + v.len <= STOP_X + 1).length;
-      spawn = queued < 1 + Math.round(S.traffic * 4);
+      spawn = queued < Math.round(S.traffic * CONFIG.trafficQueuePedsMax);
       next = 1.2;
     }
     if (spawn && entranceClear(V.peds, 8)) { V.peds.push(makePed()); V.pedT = next; } else V.pedT = 0.5;
