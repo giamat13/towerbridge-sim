@@ -188,12 +188,20 @@ button:focus-visible, #lever:focus-visible { outline: 3px solid var(--blue); out
 #btnCoal { cursor: grab; touch-action: none; }
 #btnCoal.dragging { cursor: grabbing; }
 #btnCoal.dragging .glyph { opacity: .25; }
-#btnCoal .hint { font-size: 19px; letter-spacing: .5px; color: #8fa0b8; margin-top: 8px; }
+#btnCoal .hint, #btnOil .hint { font-size: 19px; letter-spacing: .5px; color: #8fa0b8; margin-top: 8px; }
 #coalGhost { position: absolute; left: 0; top: 0; width: 120px; height: 85px; pointer-events: none; z-index: 30; opacity: 0; transition: opacity .12s; filter: drop-shadow(0 8px 6px rgba(0,0,0,.45)); }
 #coalGhost.show { opacity: 1; }
 #coalTarget { position: absolute; left: 190px; top: 452px; width: 120px; height: 120px; border-radius: 50%; border: 4px dashed rgba(214,120,30,.85); pointer-events: none; z-index: 6; opacity: 0; transition: opacity .15s, transform .15s, box-shadow .15s; }
 #coalTarget.show { opacity: 1; animation: ring 1s ease-in-out infinite; }
 #coalTarget.hot { border-style: solid; transform: scale(1.14); box-shadow: 0 0 26px 8px rgba(255,150,40,.55); animation: none; }
+#btnOil { cursor: grab; touch-action: none; }
+#btnOil.dragging { cursor: grabbing; }
+#btnOil.dragging .glyph { opacity: .25; }
+#oilGhost { position: absolute; left: 0; top: 0; width: 70px; height: 70px; pointer-events: none; z-index: 30; opacity: 0; transition: opacity .12s; filter: drop-shadow(0 8px 6px rgba(0,0,0,.45)); }
+#oilGhost.show { opacity: 1; }
+#oilTarget { position: absolute; left: 558px; top: 410px; width: 80px; height: 80px; border-radius: 50%; border: 4px dashed rgba(214,120,30,.85); pointer-events: none; z-index: 6; opacity: 0; transition: opacity .15s, transform .15s, box-shadow .15s; }
+#oilTarget.show { opacity: 1; animation: ring 1s ease-in-out infinite; }
+#oilTarget.hot { border-style: solid; transform: scale(1.14); box-shadow: 0 0 26px 8px rgba(255,150,40,.55); animation: none; }
 @keyframes ring { 50% { transform: scale(1.07); } }
 #btnOil .l { font-size: 98px; }
 #btnOil .s { font-size: 23px; letter-spacing: .5px; }
@@ -268,6 +276,7 @@ kbd { position: absolute; right: 8px; bottom: 6px; font: 600 14px/1 var(--serif)
     </div></div>
 
     <div id="coalTarget" aria-hidden="true"></div>
+    <div id="oilTarget" aria-hidden="true"></div>
     <div class="card show" id="cardStart" style="--rot:-.6deg"><div class="paper">
       <div class="head">
         <svg class="engr" viewBox="0 0 230 130" aria-hidden="true">
@@ -294,7 +303,7 @@ kbd { position: absolute; right: 8px; bottom: 6px; font: 600 14px/1 var(--serif)
       <p class="lead">TRY BEING A BRIDGE MASTER AND KEEP EVERYTHING<br>RUNNING SMOOTHLY FOR <span class="hl">2 MINUTES</span></p>
       <ol class="how">
         <li><b>1</b><span>Drag coal up into the boiler to keep the needle between 100 and 180 – never in the red.</span></li>
-        <li><b>2</b><span>Oil the machinery before the glass lubricator runs dry.</span></li>
+        <li><b>2</b><span>Drag oil up to the glass lubricator before it runs dry.</span></li>
         <li><b>3</b><span>Wait for the accumulator weights to rise past the LIFT mark.</span></li>
         <li><b>4</b><span>Raise the bridge for each ship, then lower it again for the traffic.</span></li>
       </ol>
@@ -363,7 +372,7 @@ kbd { position: absolute; right: 8px; bottom: 6px; font: 600 14px/1 var(--serif)
           <ellipse cx="74" cy="76" rx="7" ry="13" fill="#fff" opacity=".55" transform="rotate(18 74 76)"/>
         </svg>
       </span>
-      <span class="txt"><span class="l">OIL</span><span class="s">MACHINERY</span></span>
+      <span class="txt"><span class="l">OIL</span><span class="s">MACHINERY</span><span class="hint">DRAG UP TO THE LUBRICATOR</span></span>
       <kbd>O</kbd>
     </button>
 
@@ -413,6 +422,7 @@ kbd { position: absolute; right: 8px; bottom: 6px; font: 600 14px/1 var(--serif)
   </div>
 </div>
 <div id="coalGhost" aria-hidden="true" hidden></div>
+<div id="oilGhost" aria-hidden="true" hidden></div>
 <div id="rotate" role="alertdialog" aria-label="Rotate your device">
   <svg class="phone" viewBox="0 0 110 110" aria-hidden="true">
     <rect x="33" y="10" width="44" height="90" rx="8" fill="none" stroke="#efefec" stroke-width="5"/>
@@ -965,7 +975,7 @@ let S = createState();
 const V = {
   s: 1, k: 0, t: 0,
   pressureShown: 0, oilShown: CONFIG.oilStart, accShown: CONFIG.accumStart, bridgeShown: 0,
-  coalHint: 0, fire: 0.1, flow: { steam: 0, feed: 0, pump: 0, pier: 0 },
+  coalHint: 0, oilHint: 0, lastCoalT: -99, lastOilT: -99, fire: 0.1, flow: { steam: 0, feed: 0, pump: 0, pier: 0 },
   stoke: 0, sparkAt: -1, drops: [],
   shake: 0, leafShake: 0, crashT: 0,
   stopShow: 0, puffT: 0, halfRevs: 0,
@@ -1961,7 +1971,8 @@ function updateSigns() {
   else if (live && p < C.pressureCool) setSign(sg.boiler, true, 'BOILERS ARE COOLING', "KEEP STOKING OR YOU'LL RUN OUT OF STEAM!", false, false);
   else setSign(sg.boiler, false);
 
-  if (live && S.oil <= 0) setSign(sg.oil, true, 'OUT OF OIL!', 'THE ENGINES ARE GRINDING – OIL THE MACHINERY!', true, true);
+  if (live && V.oilHint > 0) setSign(sg.oil, true, 'DRAG THE OIL!', 'SWIPE THE OILER UP TO THE LUBRICATOR', false, false);
+  else if (live && S.oil <= 0) setSign(sg.oil, true, 'OUT OF OIL!', 'THE ENGINES ARE GRINDING – OIL THE MACHINERY!', true, true);
   else if (live && S.oil < C.oilLow) setSign(sg.oil, true, 'OIL RUNNING LOW', 'ENGINES SLOWING', true, false);
   else setSign(sg.oil, false);
 
@@ -2113,6 +2124,7 @@ function pauseGame() {
 function resumeGame() {
   if (S.phase !== 'paused') return;
   Sfx.init();
+  goFullscreenLandscape();
   S.phase = 'playing';
   showCard(null);
 }
@@ -2156,8 +2168,17 @@ function press(btn) {
   btn.classList.remove('pressed'); void btn.offsetWidth; btn.classList.add('pressed');
   clearTimeout(btn._t); btn._t = setTimeout(() => btn.classList.remove('pressed'), 140);
 }
-function doCoal() { press(el.coal); Sfx.init(); actShovel(S); }
-function doOil() { press(el.oil); Sfx.init(); actOil(S); }
+const INPUT_COOLDOWN = 0.22; // seconds; stops the keyboard shortcuts firing faster than a real shovel/oiler stroke
+function doCoal() {
+  if (V.t - V.lastCoalT < INPUT_COOLDOWN) return;
+  V.lastCoalT = V.t;
+  press(el.coal); Sfx.init(); actShovel(S);
+}
+function doOil() {
+  if (V.t - V.lastOilT < INPUT_COOLDOWN) return;
+  V.lastOilT = V.t;
+  press(el.oil); Sfx.init(); actOil(S);
+}
 function doLever(up) {
   Sfx.init();
   if (S.phase !== 'playing') { V.leverDrag = null; return; }
@@ -2219,7 +2240,44 @@ function endCoalDrag(e, dropped) {
 }
 el.coal.addEventListener('pointerup', (e) => endCoalDrag(e, true));
 el.coal.addEventListener('pointercancel', (e) => endCoalDrag(e, false));
-bindPress(el.oil, doOil);
+
+el.oil.addEventListener('click', (e) => { if (e.detail === 0) doOil(); }); // keyboard activation
+
+// Oil is dragged from the oiler up to the glass lubricator; a plain tap only shows a hint.
+const oilGhost = $('oilGhost'), oilTarget = $('oilTarget');
+oilGhost.hidden = false;
+oilGhost.innerHTML = el.oil.querySelector('.glyph').outerHTML.replace('class="glyph"', 'width="70" height="70"');
+stage.appendChild(oilGhost);
+let oilDrag = null;
+const inLube = (p) => Math.hypot(p.x - LUBE.x, p.y - LUBE.y) < 58;
+function moveOilGhost(p) { oilGhost.style.transform = `translate(${(p.x - 35).toFixed(1)}px, ${(p.y - 35).toFixed(1)}px)`; }
+el.oil.addEventListener('pointerdown', (e) => {
+  if (e.button > 0) return;
+  e.preventDefault();
+  Sfx.init();
+  if (S.phase !== 'playing') { press(el.oil); return; }
+  try { el.oil.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+  const p = toStage(e);
+  oilDrag = { id: e.pointerId, x0: p.x, y0: p.y };
+  moveOilGhost(p);
+  oilGhost.classList.add('show'); oilTarget.classList.add('show'); el.oil.classList.add('dragging');
+});
+el.oil.addEventListener('pointermove', (e) => {
+  if (!oilDrag || e.pointerId !== oilDrag.id) return;
+  const p = toStage(e);
+  moveOilGhost(p);
+  oilTarget.classList.toggle('hot', inLube(p));
+});
+function endOilDrag(e, dropped) {
+  if (!oilDrag || e.pointerId !== oilDrag.id) return;
+  const p = toStage(e);
+  oilDrag = null;
+  oilGhost.classList.remove('show'); oilTarget.classList.remove('show', 'hot'); el.oil.classList.remove('dragging');
+  if (dropped && inLube(p)) doOil();
+  else if (dropped) V.oilHint = 2.5;
+}
+el.oil.addEventListener('pointerup', (e) => endOilDrag(e, true));
+el.oil.addEventListener('pointercancel', (e) => endOilDrag(e, false));
 bindPress(el.lblLower, () => doLever(false));
 bindPress(el.lblRaise, () => doLever(true));
 bindPress(el.mute, toggleMute);
@@ -2347,6 +2405,7 @@ function update(dt) {
   if (half !== V.halfRevs) { if (S.phase === 'playing') Sfx.chuff(revs); V.halfRevs = half; }
   if (V.stoke > 0) V.stoke = Math.max(0, V.stoke - dt);
   if (V.coalHint > 0) V.coalHint -= dt;
+  if (V.oilHint > 0) V.oilHint -= dt;
   if (V.sparkAt > 0 && V.t >= V.sparkAt) { sparks(250, 516, 16); V.sparkAt = -1; }
   if (S.phase === 'playing' && S.pressure > C.pressureHigh) {
     V.puffT -= dt;
