@@ -522,7 +522,28 @@ const GEOM = {
   shipDangerX: 1374,  // foremast meets the tip of the lowered leaf
   shipClearX: 1012,   // mizzen has slipped behind the pier: ship has passed
   shipGoneX: 976,     // whole hull hidden behind the pier
+  // Bascule geometry, matching the renderer, used to test whether the raised leaf's
+  // tip actually reaches the ship rather than just checking "fully open or not".
+  pivotX: 1080, pivotY: 400, leafLen: 290, leafMaxDeg: 78,
+  leafTipRadius: 14,  // how close the tip must get to actually clip the ship
+  hazard: { xBack: -100, xFront: 175, yTop: -240, yBottom: 18 }, // ship's hull+rigging box, relative to (shipX, waterY)
+  waterY: 474,
 };
+const smoothStep = (t) => t * t * (3 - 2 * t);
+// Where the tip of the bascule leaf currently is, for a given raise fraction (0-1).
+function leafTip(bridgeFrac) {
+  const a = (GEOM.leafMaxDeg * Math.PI / 180) * smoothStep(clamp(bridgeFrac, 0, 1));
+  return { x: GEOM.pivotX + GEOM.leafLen * Math.cos(a), y: GEOM.pivotY - GEOM.leafLen * Math.sin(a) };
+}
+// True only if the leaf's tip, at its current angle, actually reaches the ship's hull/rigging —
+// so a partly raised bridge is safe once the tip has swung clear, not only once it's fully vertical.
+function shipTouchesLeaf(shipX, bridgeFrac) {
+  const tip = leafTip(bridgeFrac);
+  const H = GEOM.hazard;
+  const nearestX = clamp(tip.x, shipX + H.xBack, shipX + H.xFront);
+  const nearestY = clamp(tip.y, GEOM.waterY + H.yTop, GEOM.waterY + H.yBottom);
+  return Math.hypot(tip.x - nearestX, tip.y - nearestY) <= GEOM.leafTipRadius;
+}
 
 let emit = () => {};
 function setEmitter(fn) { emit = fn; }
@@ -671,11 +692,11 @@ function stepGame(S, dt) {
     }
   } else if (sh.state === 'approach') {
     sh.x -= sh.speed * dt;
+    if (shipTouchesLeaf(sh.x, S.bridge)) {
+      sh.state = 'crashed';
+      return fail(S, 'collision', S.bridge <= 0.05 && S.accum < C.raiseMinCharge ? 'accum' : null);
+    }
     if (sh.x <= GEOM.shipDangerX) {
-      if (S.bridge < C.fullyUp) {
-        sh.state = 'crashed';
-        return fail(S, 'collision', S.bridge <= 0.05 && S.accum < C.raiseMinCharge ? 'accum' : null);
-      }
       sh.state = 'passing';
       emit('shipArrived');
     }
@@ -683,7 +704,7 @@ function stepGame(S, dt) {
     sh.speed = approach(sh.speed, C.passSpeed, 30 * dt);
     sh.x -= sh.speed * dt;
     if (sh.state === 'passing') {
-      if (S.bridge < C.fullyUp) { sh.state = 'crashed'; return fail(S, 'collision', 'lowered'); }
+      if (shipTouchesLeaf(sh.x, S.bridge)) { sh.state = 'crashed'; return fail(S, 'collision', 'lowered'); }
       if (sh.x <= GEOM.shipClearX) {
         sh.state = 'leaving';
         S.shipsPassed++;
