@@ -181,6 +181,9 @@ button:focus-visible, #lever:focus-visible { outline: 3px solid var(--blue); out
 .stars svg { width: 58px; height: 58px; fill: rgba(80,65,45,.18); stroke: rgba(80,65,45,.5); stroke-width: 1; transform: scale(.6); opacity: .5; transition: transform .35s cubic-bezier(.2,1.8,.4,1), opacity .3s; }
 .stars svg.on { fill: #c8962c; stroke: #6d5220; transform: scale(1); opacity: 1; }
 .stats { display: flex; justify-content: center; gap: 34px; margin-top: 14px; }
+.stats .stat-extra { display: none; }
+.stats .stat-extra.show { display: flex; }
+.stat-extra b { color: #7a1f1f; }
 .stats div { display: flex; flex-direction: column; align-items: center; }
 .stats b { font-size: 40px; line-height: 1; font-weight: 400; }
 .stats span { font: 400 13px/1.2 var(--serif); letter-spacing: 1.5px; color: #5d5246; margin-top: 3px; }
@@ -193,7 +196,23 @@ button:focus-visible, #lever:focus-visible { outline: 3px solid var(--blue); out
     repeating-linear-gradient(90deg, rgba(255,255,255,.014) 0 2px, transparent 2px 6px),
     linear-gradient(180deg, #272728, #151516);
   border-top: 4px solid #0a0a0a; box-shadow: inset 0 1px 0 #3c3c3d;
+  transition: background .6s;
 }
+/* A shift running on borrowed time, past the usual 2 minutes. */
+#panel.continuing {
+  background:
+    linear-gradient(180deg, rgba(255,214,140,.08), transparent 28%),
+    repeating-linear-gradient(90deg, rgba(255,214,140,.018) 0 2px, transparent 2px 6px),
+    linear-gradient(180deg, #2e2410, #1a1408);
+  border-top-color: #3a2c0a;
+}
+#endlessTag {
+  position: absolute; left: 16px; top: 112px; z-index: 4; padding: 4px 13px; border-radius: 4px;
+  font: 700 13px var(--stencil); letter-spacing: 1.5px; color: #3a2a10; background: #e8c874;
+  box-shadow: 0 2px 4px rgba(0,0,0,.35); opacity: 0; transform: translateY(-4px);
+  transition: opacity .3s, transform .3s;
+}
+#endlessTag.show { opacity: 1; transform: translateY(0); }
 .ctl { position: absolute; top: 14px; height: 192px; display: flex; align-items: center; gap: 14px; color: #efefec; border-radius: 16px; transition: transform .08s, filter .15s, opacity .3s; }
 .ctl .ic { position: relative; width: 176px; height: 192px; flex: none; }
 .ctl .arrow { position: absolute; left: 50%; top: 4px; width: 76px; height: 60px; margin-left: -38px; fill: var(--slate); transition: fill .15s, transform .15s; }
@@ -234,6 +253,21 @@ kbd { position: absolute; right: 8px; bottom: 6px; font: 600 14px/1 var(--serif)
 .mini svg { width: 28px; height: 28px; fill: #d2d2ce; }
 .mini:active { transform: translateY(2px); }
 .mini .off { display: none; }
+
+/* ---------- malfunction repair spot ---------- */
+#malSpot {
+  position: absolute; z-index: 8; width: 54px; height: 54px; margin: -27px 0 0 -27px;
+  border-radius: 50%; display: none; place-items: center; cursor: pointer;
+  background: radial-gradient(circle at 35% 30%, #e8b23a, #a3612a); border: 3px solid #4a2a10;
+  box-shadow: 0 0 0 0 rgba(232,178,58,.6), 0 3px 8px rgba(0,0,0,.5);
+  animation: malPulse 1s ease-in-out infinite;
+}
+#malSpot.show { display: grid; }
+#malSpot svg { width: 28px; height: 28px; fill: #241505; }
+#malSpot.hit { animation: malHit .15s; }
+@keyframes malPulse { 50% { box-shadow: 0 0 0 10px rgba(232,178,58,0), 0 3px 8px rgba(0,0,0,.5); } }
+@keyframes malHit { 50% { transform: scale(.82); } }
+@media (prefers-reduced-motion: reduce) { #malSpot { animation: none; } }
 .mini.is-off .on { display: none; }
 .mini.is-off .off { display: block; }
 
@@ -282,6 +316,7 @@ kbd { position: absolute; right: 8px; bottom: 6px; font: 600 14px/1 var(--serif)
   <div id="scene">
     <canvas id="cv" aria-label="Cutaway of Tower Bridge's steam-hydraulic machinery" role="img"></canvas>
     <a id="toOriginal" href="original.html">ORIGINAL VERSION</a>
+    <div id="endlessTag" aria-hidden="true">EXTRA TIME</div>
 
     <div id="clock" aria-hidden="true">
       <div class="paper"></div>
@@ -304,6 +339,10 @@ kbd { position: absolute; right: 8px; bottom: 6px; font: 600 14px/1 var(--serif)
     <div class="sign" id="sgBoiler" style="left:16px;top:210px;width:272px;--rot:-1.2deg"><div class="paper"><div class="t"></div><div class="b"></div></div></div>
     <div class="sign" id="sgOil" style="left:320px;top:210px;width:262px;--rot:1deg"><div class="paper"><div class="t"></div><div class="b"></div></div></div>
     <div class="sign" id="sgAccum" style="left:596px;top:200px;width:216px;--rot:-.8deg"><div class="paper"><div class="t"></div><div class="b ruled"></div></div></div>
+    <div class="sign" id="sgMal" style="left:920px;top:210px;width:230px;--rot:1.1deg"><div class="paper"><div class="t red"></div><div class="b"></div></div></div>
+    <button id="malSpot" aria-label="Fix the malfunction">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6l-3 3-4.3-4.3C.6 7.1 1 10.1 3 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.4-.4.4-1 0-1.4z"/></svg>
+    </button>
     <div class="sign" id="sgTraffic" style="left:652px;top:78px;width:262px;--rot:.8deg"><div class="paper"><div class="t"></div><div class="b"></div></div></div>
     <div class="sign" id="sgBridge" style="left:1152px;top:130px;width:238px;--rot:-1deg"><div class="paper"><div class="t"></div><div class="b"></div></div></div>
     <div class="sign" id="sgBoat" style="left:1334px;top:12px;width:254px;--rot:.6deg"><div class="paper"><div class="t"></div><div class="b"></div>
@@ -379,8 +418,10 @@ kbd { position: absolute; right: 8px; bottom: 6px; font: 600 14px/1 var(--serif)
       <div class="stats">
         <div><b id="lTime">0:00</b><span>SURVIVED</span></div>
         <div><b id="lShips">0</b><span>SHIPS PASSED</span></div>
+        <div class="stat-extra" id="lExtraWrap"><b id="lExtra">0:00</b><span>PAST 2:00</span></div>
       </div>
       <div class="record-badge" id="lRecord">NEW BEST TIME!</div>
+      <div class="record-badge" id="lContinueRecord">NEW BEST CONTINUE!</div>
       <button class="stamp" id="btnRetry">TRY AGAIN</button>
     </div></div>
 
@@ -554,6 +595,17 @@ const CONFIG = {
   trafficQueueCarsMax: 8,      // vehicles queued at 100% traffic
   trafficQueuePedsMax: 4,      // pedestrians queued at 100% traffic
 
+  // Malfunctions: an occasional stuck valve or pipe leak, cleared by clicking it
+  // enough times before it starts costing pressure or accumulator charge.
+  malfunctionMinGap: 30,
+  malfunctionMaxGap: 50,
+  malfunctionEndlessGapMul: 0.6,   // gaps shrink once the shift is running long
+  malfunctionHitsNeeded: 4,
+  malfunctionGrace: 7,             // seconds before the first penalty tick
+  malfunctionPenaltyInterval: 4,   // seconds between repeated penalties if left unfixed
+  valveThrottle: 0.12,             // pump efficiency multiplier while a valve is stuck
+  leakPressureDrop: 6,             // extra pressure/s lost while a pipe leaks
+
   // Star rating: share of time in the ideal pressure range
   starIdeal2: 0.55,
   starIdeal3: 0.8,
@@ -653,6 +705,7 @@ function createState() {
     oil: CONFIG.oilStart, oilTank: rand(CONFIG.oilTankMin, CONFIG.oilTankMax), dryTime: 0,
     engineSpeed: 0, crank: 0, pumpEff: 0,
     accum: CONFIG.accumStart, accumHint: 0,
+    malfunction: null, nextMalfunctionIn: rand(CONFIG.malfunctionMinGap, CONFIG.malfunctionMaxGap),
     bridge: 0, leverUp: false, bridgeMoving: 0, stalled: false,
     ship: null, shipCount: 0, shipsPassed: 0, grandPassed: 0, urgentPassed: 0, passedAt: -99,
     shipSchedule: generateShipSchedule(), nextShipIdx: 0,
@@ -705,6 +758,13 @@ function actLever(S, up) {
   return 'ok';
 }
 
+function actRepair(S) {
+  if (S.phase !== 'playing' || !S.malfunction) return false;
+  S.malfunction.hits++;
+  emit('repairHit');
+  return true;
+}
+
 function fail(S, reason, note) {
   S.phase = 'failing';
   S.failReason = reason;
@@ -743,6 +803,31 @@ function stepGame(S, dt) {
   if (S.overTime > C.burstTime) return fail(S, 'burst');
   if (S.lowTime > C.deadTime) return fail(S, 'steam');
 
+  // 1.5 Occasional malfunctions: a stuck valve throttles the pumps, a leaking pipe
+  // drains extra pressure, until enough clicks on the trouble spot clear it.
+  if (!S.malfunction) {
+    S.nextMalfunctionIn -= dt;
+    if (S.nextMalfunctionIn <= 0) {
+      S.malfunction = { type: Math.random() < 0.5 ? 'valve' : 'leak', hits: 0, needed: C.malfunctionHitsNeeded, age: 0, lastPenalty: 0 };
+      emit('malfunctionStart', S.malfunction.type);
+    }
+  } else {
+    const m = S.malfunction;
+    m.age += dt;
+    if (m.type === 'leak') S.pressure = Math.max(0, S.pressure - C.leakPressureDrop * dt);
+    if (m.age >= C.malfunctionGrace && m.age - m.lastPenalty >= C.malfunctionPenaltyInterval) {
+      m.lastPenalty = m.age;
+      if (m.type === 'valve') S.accum = Math.max(0, S.accum - 0.12);
+      else S.pressure = Math.max(0, S.pressure - 15);
+      emit('malfunctionPenalty', m.type);
+    }
+    if (m.hits >= m.needed) {
+      S.malfunction = null;
+      S.nextMalfunctionIn = rand(C.malfunctionMinGap, C.malfunctionMaxGap) * (S.continuing ? C.malfunctionEndlessGapMul : 1);
+      emit('malfunctionFixed');
+    }
+  }
+
   // 2. Steam engine and its lubricator.
   const fp = pressureFactor(S.pressure);
   if (fp > 0) S.oil = Math.max(0, S.oil - dt / S.oilTank * lerp(1, C.oilRamp, k) * (0.35 + 0.65 * fp));
@@ -754,6 +839,7 @@ function stepGame(S, dt) {
 
   // 3. Hydraulic pumps charge the accumulators.
   S.pumpEff = fp * oilPumpFactor(S.oil);
+  if (S.malfunction && S.malfunction.type === 'valve') S.pumpEff *= C.valveThrottle;
   if (S.accum < 1) S.accum = Math.min(1, S.accum + C.pumpRate * S.pumpEff * dt);
 
   // 4. Bascule: lifting spends accumulator charge.
@@ -1061,6 +1147,22 @@ const Sfx = (() => {
       tone({ type: 'triangle', f: 1250, f2: 1180, dur: 0.5, gain: 0.1 });
       tone({ type: 'triangle', f: 2500, f2: 2360, dur: 0.4, gain: 0.05 });
     },
+    malfunctionStart() {
+      noise({ type: 'lowpass', f: 900, dur: 0.3, gain: 0.3 });
+      tone({ type: 'sawtooth', f: 220, f2: 90, dur: 0.35, gain: 0.12 });
+    },
+    clank() {
+      noise({ type: 'bandpass', f: 1800, q: 3, dur: 0.05, gain: 0.25 });
+      tone({ type: 'square', f: 300, f2: 180, dur: 0.06, gain: 0.08 });
+    },
+    malfunctionPenalty() {
+      noise({ type: 'lowpass', f: 500, dur: 0.3, gain: 0.35 });
+      tone({ type: 'square', f: 130, f2: 70, dur: 0.25, gain: 0.1 });
+    },
+    malfunctionFixed() {
+      tone({ f: 700, f2: 1100, dur: 0.15, gain: 0.15 });
+      tone({ f: 1100, f2: 1500, dur: 0.12, gain: 0.1, delay: 0.1 });
+    },
     fizzle() {
       tone({ f: 170, f2: 38, dur: 1.4, gain: 0.3 });
       noise({ type: 'highpass', f: 1800, f2: 5000, dur: 1.2, gain: 0.18, attack: 0.05 });
@@ -1082,6 +1184,7 @@ const ROAD_Y = 392, WATER_Y = 470;
 const PIVOT_X = 1080, PIVOT_Y = 400, LEAF_LEN = 290, LEAF_MAX = 78 * Math.PI / 180;
 const PIER_FACE = 1130;
 const STOP_X = 800, HEEL_X = 1058, TIP_FADE = 1300;
+const MAL_SPOTS = { valve: { x: 693, y: 505 }, leak: { x: 400, y: 445 } };
 const GAUGE = { x: 82, y: 478, r: 48 };
 const FLY = { x: 395, y: 505, r: 56, crank: 28, rod: 110 };
 const LUBE = { x: 598, y: 450, r: 18 };
@@ -2124,9 +2227,11 @@ const $ = (id) => document.getElementById(id);
 const el = {
   body: document.body,
   clock: $('clock'), digits: [...document.querySelectorAll('#clock .d')],
+  panel: $('panel'), endlessTag: $('endlessTag'),
   tmeter: $('tmeter'), tfill: document.querySelector('#tmeter .fill'), shipsN: $('shipsN'),
   shiplogTimes: $('shiplogTimes'),
-  signs: { boiler: $('sgBoiler'), oil: $('sgOil'), accum: $('sgAccum'), traffic: $('sgTraffic'), bridge: $('sgBridge'), boat: $('sgBoat') },
+  signs: { boiler: $('sgBoiler'), oil: $('sgOil'), accum: $('sgAccum'), traffic: $('sgTraffic'), bridge: $('sgBridge'), boat: $('sgBoat'), mal: $('sgMal') },
+  malSpot: $('malSpot'),
   track: $('track'), trackBoat: $('trackBoat'),
   cards: { start: $('cardStart'), win: $('cardWin'), lose: $('cardLose'), pause: $('cardPause') },
   coal: $('btnCoal'), oil: $('btnOil'), mute: $('btnMute'), pause: $('btnPause'),
@@ -2179,6 +2284,19 @@ function updateSigns() {
   else if (live && S.oil < C.oilLow) setSign(sg.oil, true, 'OIL RUNNING LOW', 'ENGINES SLOWING', true, false);
   else setSign(sg.oil, false);
 
+  const m = S.malfunction;
+  if (live && m) {
+    const label = m.type === 'valve' ? ['STUCK VALVE!', 'CLICK IT LOOSE!'] : ['PIPE LEAK!', 'PATCH IT UP!'];
+    setSign(sg.mal, true, label[0], `${label[1]} (${m.hits}/${m.needed})`, true, m.age > C.malfunctionGrace);
+    const spot = m.type === 'valve' ? MAL_SPOTS.valve : MAL_SPOTS.leak;
+    el.malSpot.style.left = spot.x + 'px';
+    el.malSpot.style.top = spot.y + 'px';
+    el.malSpot.classList.add('show');
+  } else {
+    setSign(sg.mal, false);
+    el.malSpot.classList.remove('show');
+  }
+
   const sh = S.ship;
   const shNeedsLift = sh && SHIP_KINDS[sh.kind].needsLift;
   const needAccum = live && (S.accumHint > 0 || (S.leverUp && S.stalled) ||
@@ -2216,6 +2334,8 @@ function updateSigns() {
 }
 
 function updateHud() {
+  el.panel.classList.toggle('continuing', S.continuing);
+  el.endlessTag.classList.toggle('show', S.continuing);
   // flip clock: counts down as usual, but once the player has chosen to carry on past
   // the first finish, there's no more end to count down to, so it counts elapsed time up.
   const left = S.phase === 'title' ? CONFIG.gameDuration
@@ -2260,12 +2380,14 @@ function fmtTime(s) { s = Math.floor(s); return `${Math.floor(s / 60)}:${String(
 
 const Records = (() => {
   const KEY = 'bridgeMaster.records';
-  const data = { bestTime: 0, bestStars: 0, bestShips: 0, gamesPlayed: 0, wins: 0 };
+  const data = { bestTime: 0, bestStars: 0, bestShips: 0, bestContinueTime: 0, gamesPlayed: 0, wins: 0 };
   try { Object.assign(data, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch (e) { /* unavailable */ }
   function save() { try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (e) { /* unavailable */ } }
   return {
     get: () => data,
-    recordGame({ time, won, stars, ships }) {
+    // continueTime is the extra time survived past the 2-minute mark after pressing
+    // CONTINUE (0 if this run never continued) — its own record, separate from bestTime.
+    recordGame({ time, won, stars, ships, continueTime = 0 }) {
       data.gamesPlayed++;
       const newTime = time > data.bestTime;
       if (newTime) data.bestTime = time;
@@ -2276,8 +2398,10 @@ const Records = (() => {
         if (newStars) data.bestStars = stars;
         if (ships > data.bestShips) data.bestShips = ships;
       }
+      const newContinueTime = continueTime > 0 && continueTime > data.bestContinueTime;
+      if (newContinueTime) data.bestContinueTime = continueTime;
       save();
-      return { newTime, newStars };
+      return { newTime, newStars, newContinueTime };
     },
   };
 })();
@@ -2289,6 +2413,7 @@ function updateBestLine() {
   node.innerHTML = r.wins > 0
     ? `Best so far: <b>${fmtTime(r.bestTime)}</b> survived · <b>${starGlyphs(r.bestStars)}</b> · <b>${r.bestShips}</b> ships`
     : `Best so far: <b>${fmtTime(r.bestTime)}</b> survived`;
+  if (r.bestContinueTime > 0) node.innerHTML += ` · <b>+${fmtTime(r.bestContinueTime)}</b> on CONTINUE`;
   node.classList.add('show');
 }
 
@@ -2363,8 +2488,12 @@ function showLose() {
   $('lTip').textContent = tip;
   $('lTime').textContent = fmtTime(S.elapsed);
   $('lShips').textContent = S.shipsPassed;
-  const { newTime } = Records.recordGame({ time: S.elapsed, won: false });
+  const continueTime = S.continuing ? Math.max(0, S.elapsed - CONFIG.gameDuration) : 0;
+  $('lExtra').textContent = fmtTime(continueTime);
+  $('lExtraWrap').classList.toggle('show', S.continuing);
+  const { newTime, newContinueTime } = Records.recordGame({ time: S.elapsed, won: false, continueTime });
   $('lRecord').classList.toggle('show', newTime);
+  $('lContinueRecord').classList.toggle('show', newContinueTime);
   showCard('lose');
   say(`${f.title} ${sub}`);
 }
@@ -2458,6 +2587,13 @@ function onGameEvent(type, data) {
       el.lever.classList.remove('shake'); void el.lever.offsetWidth; el.lever.classList.add('shake');
       say('Not enough pressure in the accumulators to lift the bridge.');
       break;
+    case 'repairHit': Sfx.clank(); break;
+    case 'malfunctionStart':
+      Sfx.malfunctionStart();
+      say(data === 'valve' ? 'A valve has stuck! Click it loose.' : 'A pipe is leaking! Patch it up.');
+      break;
+    case 'malfunctionPenalty': Sfx.malfunctionPenalty(); V.shake = Math.max(V.shake, 2); break;
+    case 'malfunctionFixed': Sfx.malfunctionFixed(); say('Fixed!'); break;
     case 'shipSpawn': {
       const kindDef = SHIP_KINDS[data];
       if (kindDef.urgent) { Sfx.siren(); say('A fire tug is approaching fast. Lift the bridge now!'); }
@@ -2504,6 +2640,12 @@ function doLever(up) {
   Sfx.init();
   if (S.phase !== 'playing') { V.leverDrag = null; return; }
   actLever(S, up);
+}
+function doRepair() {
+  Sfx.init();
+  if (actRepair(S)) {
+    el.malSpot.classList.remove('hit'); void el.malSpot.offsetWidth; el.malSpot.classList.add('hit');
+  }
 }
 function toggleMute() {
   Sfx.init();
@@ -2603,6 +2745,7 @@ bindPress(el.lblLower, () => doLever(false));
 bindPress(el.lblRaise, () => doLever(true));
 bindPress(el.mute, toggleMute);
 bindPress(el.pause, togglePause);
+bindPress(el.malSpot, doRepair);
 $('btnStart').addEventListener('click', startGame);
 $('btnRestart').addEventListener('click', startGame);
 $('btnContinue').addEventListener('click', continueGame);
