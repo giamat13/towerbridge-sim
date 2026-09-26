@@ -2274,16 +2274,21 @@ function updateBestLine() {
 
 function buildShipLog() {
   el.shiplogTimes.innerHTML = S.shipSchedule.map((entry) => {
-    const clockLeft = Math.max(0, CONFIG.gameDuration - entry.t);
     const mark = SHIP_KINDS[entry.kind].urgent ? ' !' : SHIP_KINDS[entry.kind].grand ? ' ★' : '';
-    return `<span>${fmtTime(clockLeft)}${mark}</span>`;
+    return `<span data-mark="${mark}"><b></b>${mark}</span>`;
   }).join('');
   V.shiplogSighted = -1;
 }
 function updateShipLog() {
+  const kids = el.shiplogTimes.children;
+  for (let i = 0; i < kids.length; i++) {
+    const arrived = i < S.shipCount;
+    const b = kids[i].firstChild;
+    b.textContent = arrived ? '–' : fmtTime(Math.max(0, S.shipSchedule[i].t - S.elapsed));
+  }
   if (V.shiplogSighted === S.shipCount) return;
   V.shiplogSighted = S.shipCount;
-  [...el.shiplogTimes.children].forEach((el2, i) => {
+  [...kids].forEach((el2, i) => {
     el2.classList.toggle('done', i < S.shipCount);
     el2.classList.toggle('next', i === S.shipCount);
   });
