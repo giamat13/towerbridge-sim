@@ -243,23 +243,12 @@ kbd { position: absolute; right: 8px; bottom: 6px; font: 600 14px/1 var(--serif)
 @keyframes turn { 0%, 20% { transform: rotate(0deg); } 50%, 80% { transform: rotate(-90deg); } 100% { transform: rotate(0deg); } }
 @media (prefers-reduced-motion: reduce) { #rotate .phone { animation: none; transform: rotate(-90deg); } }
 @media (prefers-reduced-motion: reduce) { .sign.urgent .paper, .ctl.nudge .arrow { animation: none; } }
-
-#toOriginal {
-  /* Positioned in the scene's own 1600x580 coordinate space (not viewport-fixed) so it
-     scales and stays put with everything else, clear of the boat/traffic signs above it. */
-  position: absolute; right: 12px; top: 128px; z-index: 5;
-  padding: 6px 12px; border-radius: 6px; font: 600 13px var(--serif); letter-spacing: .3px;
-  color: #d8d3c4; background: rgba(20,20,20,.55); border: 1px solid rgba(255,255,255,.18);
-  text-decoration: none; transition: background .15s, opacity .15s; opacity: .65;
-}
-#toOriginal:hover, #toOriginal:focus-visible { opacity: 1; background: rgba(20,20,20,.8); }
 </style>
 </head>
 <body class="idle">
 <div id="stage">
   <div id="scene">
     <canvas id="cv" aria-label="Cutaway of Tower Bridge's steam-hydraulic machinery" role="img"></canvas>
-    <a id="toOriginal" href="original.html">ORIGINAL VERSION</a>
 
     <div id="clock" aria-hidden="true">
       <div class="paper"></div>
