@@ -1,0 +1,35 @@
+# Publishes the `original` branch's index.html to main as original.html,
+# using deploy-original.sh from main.
+name: Deploy original
+
+on:
+  push:
+    branches: [original]
+    paths:
+      - index.html
+      - .github/workflows/deploy-original.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: deploy-original
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Configure git author
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Deploy original.html
+        run: bash deploy-original.sh
