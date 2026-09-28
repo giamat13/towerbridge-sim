@@ -630,9 +630,10 @@ const CONFIG = {
   // Ships
   firstShipMin: 10,
   firstShipMax: 14,
-  shipIntervalMin: 25,
-  shipIntervalMax: 35,
-  shipIntervalRamp: 0.85,     // interval multiplier reached at 00:00
+  shipIntervalMin: 40,        // seconds between ships that need a lift, so the road gets a
+  shipIntervalMax: 50,        // proper spell open between closures
+  shipIntervalRamp: 0.9,      // interval multiplier reached at 00:00
+  smallBoatGapMul: 0.4,       // a small boat (no lift) only uses up this share of a gap
   approachTimeStart: 13,      // seconds from sighting to reaching the bridge
   approachTimeEnd: 10.5,
   passSpeed: 85,              // px/s once the ship is under the bridge
@@ -640,7 +641,7 @@ const CONFIG = {
 
   // Road traffic (0–1)
   trafficFill: 0.0095,        // per second while the road is closed
-  deckClearTime: 6,           // seconds, after the gates close, for the last traffic to get off the bridge
+  deckClearTime: 4,           // seconds, after the gates close, for the last traffic to get off the bridge
   trafficDrain: 0.06,         // per second while it is down
   trafficWarn: 0.7,
   trafficQueueCarsMax: 6,      // vehicles queued at 100% traffic
@@ -764,9 +765,12 @@ function generateShipSchedule() {
     if (C.gameDuration - t <= approachTime + 1) break;
     const kind = sched.length === 0 ? 'tall' : pickShipKind(sched.length >= 2);
     sched.push({ t, kind });
-    t += rand(C.shipIntervalMin, C.shipIntervalMax) * lerp(1, C.shipIntervalRamp, k);
+    t += shipGap(kind, lerp(1, C.shipIntervalRamp, k));
   }
   return sched;
+}
+function shipGap(kind, mul) {
+  return rand(CONFIG.shipIntervalMin, CONFIG.shipIntervalMax) * mul * (SHIP_KINDS[kind].needsLift ? 1 : CONFIG.smallBoatGapMul);
 }
 
 function createState() {
@@ -1039,8 +1043,8 @@ function stepGame(S, dt) {
 function extendShipSchedule(S) {
   const C = CONFIG;
   while (S.shipSchedule.length - S.nextShipIdx < 2) {
-    const last = S.shipSchedule.length ? S.shipSchedule[S.shipSchedule.length - 1].t : S.elapsed;
-    const t = Math.max(last, S.elapsed) + rand(C.shipIntervalMin, C.shipIntervalMax) * C.shipIntervalRamp;
+    const prev = S.shipSchedule[S.shipSchedule.length - 1];
+    const t = prev ? Math.max(prev.t + shipGap(prev.kind, C.shipIntervalRamp), S.elapsed) : S.elapsed + shipGap('tall', C.shipIntervalRamp);
     S.shipSchedule.push({ t, kind: pickShipKind(true) });
   }
 }
@@ -1892,7 +1896,7 @@ function roadClosed() { return S.gatesClosed || bridgeAny(S) > 0 || S.leverUp ||
 // Once the gates shut with the bridge still down, anything already past them hurries on
 // across to the north road; the bridge counts as clear only once they're all off it.
 const onDeck = (v) => v.x + v.len > STOP_X + 0.5 && v.x < FAR_ROAD_X;
-const hurrySpeed = (v) => (v.len < 20 ? 60 : v.speed * 1.5);
+const hurrySpeed = (v) => (v.len < 20 ? 90 : v.speed * 2.2);
 
 function updateLane(list, gap, dt, queueCap) {
   const closed = roadClosed();
