@@ -121,11 +121,11 @@ button:focus-visible, #lever:focus-visible { outline: 3px solid var(--blue); out
 
 /* ---------- ship schedule ---------- */
 #shiplog { position: absolute; left: 980px; top: 14px; width: 340px; height: 56px; z-index: 4; filter: drop-shadow(0 3px 4px rgba(0,0,0,.3)); }
-#shiplog .paper { height: 100%; display: flex; align-items: center; gap: 10px; padding: 0 15px; }
-#shiplog .lbl { font-size: 18px; letter-spacing: .5px; flex: none; }
-#shiplog .times { display: flex; align-items: baseline; gap: 8px; overflow: hidden; font: 400 18px var(--serif); color: #4a4036; }
+#shiplog .paper { height: 100%; display: flex; align-items: center; gap: 7px; padding: 0 11px; }
+#shiplog .lbl { font-size: 16px; letter-spacing: .3px; flex: none; }
+#shiplog .times { display: flex; align-items: baseline; gap: 4px; overflow: hidden; font: 400 16px var(--serif); color: #4a4036; }
 #shiplog .times span { white-space: nowrap; }
-#shiplog .times span::after { content: '\00b7'; margin-left: 8px; color: #a89a80; }
+#shiplog .times span::after { content: '\00b7'; margin-left: 4px; color: #a89a80; }
 #shiplog .times span:last-child::after { content: ''; }
 #shiplog .times span.done { text-decoration: line-through; opacity: .4; }
 #shiplog .times span.next { font-weight: 700; color: var(--red); }
@@ -586,7 +586,8 @@ const CONFIG = {
   shipIntervalRamp: 0.85,     // interval multiplier reached at 00:00
   approachTimeStart: 13,      // seconds from sighting to reaching the bridge
   approachTimeEnd: 10.5,
-  passSpeed: 60,              // px/s once the ship is under the bridge
+  passSpeed: 85,              // px/s once the ship is under the bridge
+  northEngineRate: 0.85,      // the north leaf's engines are fed across the walkway, so run a little slower
 
   // Road traffic (0–1)
   trafficFill: 0.014,         // per second while the bridge is not down
@@ -611,16 +612,20 @@ const CONFIG = {
   starIdeal3: 0.8,
 };
 
-// Ship positions (the x of the foremast, in scene pixels).
+// Ship positions (the x of the foremast, in scene pixels). The ship comes out from
+// behind the north pier, crosses the gap between the two piers and slips behind the
+// south one.
 const GEOM = {
-  shipSpawnX: 1700,   // just off the right edge
-  shipDangerX: 1374,  // foremast meets the tip of the lowered leaf
-  shipClearX: 954,    // the whole ship, spanker included, has slipped behind the pier
+  shipSpawnX: 1861,   // hidden behind the north tower
+  shipDangerX: 1535,  // its bows reach the bridge as they come out from behind the north pier
+  shipClearX: 954,    // the whole ship, spanker included, has slipped behind the south pier
   shipGoneX: 950,
-  // Bascule geometry, matching the renderer, used to test whether the raised leaf's
-  // tip actually reaches the ship rather than just checking "fully open or not".
-  pivotX: 1080, pivotY: 400, leafLen: 290, leafMaxDeg: 78,
-  pierFace: 1130,     // anything left of this is hidden inside the pier
+  // Bascule geometry, matching the renderer. The south leaf pivots in the left pier;
+  // the north leaf is its mirror image in the right pier, the two meeting mid-river.
+  pivotX: 1080, pivotY: 400, leafLen: 210, leafMaxDeg: 78,
+  pierFace: 1130,     // anything left of this is hidden inside the south pier
+  farPivotX: 1500,
+  farPierFace: 1450,  // anything right of this is hidden inside the north pier
   waterY: 474,        // the ship's drawing origin (foremast foot at the waterline)
   // Outline of the ship as drawn (relative to the foremast at the waterline): bowsprit,
   // forestay up to the foremast top, mast tops, spanker, stern, keel and bow.
@@ -645,19 +650,26 @@ function pointInPolygon(x, y, poly) {
   }
   return inside;
 }
-// True only if some part of the leaf, at its current angle, is actually inside the ship's
-// outline — a partly raised bridge is fine as long as nothing on screen touches.
-function shipTouchesLeaf(shipX, bridgeFrac) {
-  const a = (GEOM.leafMaxDeg * Math.PI / 180) * smoothStep(clamp(bridgeFrac, 0, 1));
+// True only if some part of either leaf, at its current angle, is actually inside the
+// ship's outline — a partly raised bridge is fine as long as nothing on screen touches.
+function leafTouchesShip(shipX, frac, north) {
+  const a = (GEOM.leafMaxDeg * Math.PI / 180) * smoothStep(clamp(frac, 0, 1));
   const c = Math.cos(-a), sn = Math.sin(-a);
   for (const [u, v] of LEAF_POINTS) {
-    const x = GEOM.pivotX + u * c - v * sn;
-    if (x <= GEOM.pierFace) continue;
+    const dx = u * c - v * sn;
+    const x = north ? GEOM.farPivotX - dx : GEOM.pivotX + dx;
+    if (x <= GEOM.pierFace || x >= GEOM.farPierFace) continue;
     const y = GEOM.pivotY + u * sn + v * c;
     if (pointInPolygon(x - shipX, y - GEOM.waterY, GEOM.shipOutline)) return true;
   }
   return false;
 }
+function shipTouchesLeaf(shipX, south, north) {
+  return leafTouchesShip(shipX, south, false) || leafTouchesShip(shipX, north, true);
+}
+// How far both leaves are open (the lesser) / whether either is open at all.
+const bridgeOpen = (S) => Math.min(S.bridge, S.bridgeFar);
+const bridgeAny = (S) => Math.max(S.bridge, S.bridgeFar);
 
 let emit = () => {};
 function setEmitter(fn) { emit = fn; }
@@ -706,7 +718,7 @@ function createState() {
     engineSpeed: 0, crank: 0, pumpEff: 0,
     accum: CONFIG.accumStart, accumHint: 0,
     malfunction: null, nextMalfunctionIn: rand(CONFIG.malfunctionMinGap, CONFIG.malfunctionMaxGap),
-    bridge: 0, leverUp: false, bridgeMoving: 0, stalled: false,
+    bridge: 0, bridgeFar: 0, leverUp: false, bridgeMoving: 0, stalled: false,
     ship: null, shipCount: 0, shipsPassed: 0, grandPassed: 0, urgentPassed: 0, passedAt: -99,
     shipSchedule: generateShipSchedule(), nextShipIdx: 0,
     traffic: 0, peakTraffic: 0,
@@ -748,7 +760,7 @@ function actOil(S) {
 function actLever(S, up) {
   if (S.phase !== 'playing') return 'ignored';
   if (up === S.leverUp) return 'same';
-  if (up && S.bridge <= 0 && S.accum < CONFIG.raiseMinCharge) {
+  if (up && bridgeAny(S) <= 0 && S.accum < CONFIG.raiseMinCharge) {
     S.accumHint = CONFIG.accumHintTime;
     emit('leverRefused');
     return 'refused';
@@ -808,7 +820,9 @@ function stepGame(S, dt) {
   if (!S.malfunction) {
     S.nextMalfunctionIn -= dt;
     if (S.nextMalfunctionIn <= 0) {
-      S.malfunction = { type: Math.random() < 0.5 ? 'valve' : 'leak', hits: 0, needed: C.malfunctionHitsNeeded, age: 0, lastPenalty: 0 };
+      const r = Math.random();
+      const type = r < 0.4 ? 'valve' : r < 0.7 ? 'leak' : 'engine';
+      S.malfunction = { type, side: Math.random() < 0.5 ? 'south' : 'north', hits: 0, needed: C.malfunctionHitsNeeded, age: 0, lastPenalty: 0 };
       emit('malfunctionStart', S.malfunction.type);
     }
   } else {
@@ -817,9 +831,10 @@ function stepGame(S, dt) {
     if (m.type === 'leak') S.pressure = Math.max(0, S.pressure - C.leakPressureDrop * dt);
     if (m.age >= C.malfunctionGrace && m.age - m.lastPenalty >= C.malfunctionPenaltyInterval) {
       m.lastPenalty = m.age;
+      // A jammed engine is its own penalty: that leaf simply won't move until it's freed.
       if (m.type === 'valve') S.accum = Math.max(0, S.accum - 0.12);
-      else S.pressure = Math.max(0, S.pressure - 15);
-      emit('malfunctionPenalty', m.type);
+      else if (m.type === 'leak') S.pressure = Math.max(0, S.pressure - 15);
+      if (m.type !== 'engine') emit('malfunctionPenalty', m.type);
     }
     if (m.hits >= m.needed) {
       S.malfunction = null;
@@ -842,23 +857,37 @@ function stepGame(S, dt) {
   if (S.malfunction && S.malfunction.type === 'valve') S.pumpEff *= C.valveThrottle;
   if (S.accum < 1) S.accum = Math.min(1, S.accum + C.pumpRate * S.pumpEff * dt);
 
-  // 4. Bascule: lifting spends accumulator charge.
+  // 4. Bascule: one lever works both leaves, but each has its own engines. Each leaf
+  // costs half of a full lift; the north engines run a little slower, and a jammed
+  // engine stops its leaf dead, so the two can fall out of step.
   S.bridgeMoving = 0;
   S.stalled = false;
-  if (S.leverUp && S.bridge < 1) {
-    const want = Math.min(dt / C.raiseTime, 1 - S.bridge);
-    const step = Math.min(want, S.accum / C.raiseCost);
-    S.bridge = Math.min(1, S.bridge + step);
-    S.accum = Math.max(0, S.accum - step * C.raiseCost);
-    if (step > 1e-9) S.bridgeMoving = 1;
-    if (step < want * 0.5) S.stalled = true;
-  } else if (!S.leverUp && S.bridge > 0) {
-    const step = Math.min(dt / C.lowerTime, S.bridge);
-    S.bridge = Math.max(0, S.bridge - step);
-    S.accum = Math.max(0, S.accum - step * C.lowerCost);
-    S.bridgeMoving = -1;
-  } else if (S.leverUp) {
-    S.accum = Math.max(0, S.accum - C.holdDrain * dt);
+  const jam = S.malfunction && S.malfunction.type === 'engine' ? S.malfunction.side : null;
+  const rate = { bridge: jam === 'south' ? 0 : 1, bridgeFar: jam === 'north' ? 0 : C.northEngineRate };
+  if (S.leverUp) {
+    const want = {};
+    let need = 0;
+    for (const key of ['bridge', 'bridgeFar']) {
+      want[key] = Math.min(dt / C.raiseTime * rate[key], 1 - S[key]);
+      need += want[key] * C.raiseCost / 2;
+    }
+    const share = need > 0 ? Math.min(1, S.accum / need) : 1;
+    for (const key of ['bridge', 'bridgeFar']) {
+      const step = want[key] * share;
+      S[key] = Math.min(1, S[key] + step);
+      S.accum = Math.max(0, S.accum - step * C.raiseCost / 2);
+      if (step > 1e-9) S.bridgeMoving = 1;
+      if (rate[key] > 0 && want[key] > 1e-9 && step < want[key] * 0.5) S.stalled = true;
+    }
+    if (bridgeOpen(S) >= 1) S.accum = Math.max(0, S.accum - C.holdDrain * dt);
+  } else {
+    for (const key of ['bridge', 'bridgeFar']) {
+      if (S[key] <= 0) continue;
+      const step = Math.min(dt / C.lowerTime * rate[key], S[key]);
+      S[key] = Math.max(0, S[key] - step);
+      S.accum = Math.max(0, S.accum - step * C.lowerCost / 2);
+      if (step > 0) S.bridgeMoving = -1;
+    }
   }
   if (S.accumHint > 0) S.accumHint -= dt;
 
@@ -877,9 +906,9 @@ function stepGame(S, dt) {
     }
   } else if (sh.state === 'approach') {
     sh.x -= sh.speed * dt;
-    if (SHIP_KINDS[sh.kind].needsLift && shipTouchesLeaf(sh.x, S.bridge)) {
+    if (SHIP_KINDS[sh.kind].needsLift && shipTouchesLeaf(sh.x, S.bridge, S.bridgeFar)) {
       sh.state = 'crashed';
-      return fail(S, 'collision', S.bridge <= 0.05 && S.accum < C.raiseMinCharge ? 'accum' : null);
+      return fail(S, 'collision', bridgeAny(S) <= 0.05 && S.accum < C.raiseMinCharge ? 'accum' : null);
     }
     if (sh.x <= GEOM.shipDangerX) {
       sh.state = 'passing';
@@ -890,7 +919,7 @@ function stepGame(S, dt) {
     sh.speed = approach(sh.speed, C.passSpeed * kindDef.passMul, 30 * dt);
     sh.x -= sh.speed * dt;
     if (sh.state === 'passing') {
-      if (kindDef.needsLift && shipTouchesLeaf(sh.x, S.bridge)) { sh.state = 'crashed'; return fail(S, 'collision', 'lowered'); }
+      if (kindDef.needsLift && shipTouchesLeaf(sh.x, S.bridge, S.bridgeFar)) { sh.state = 'crashed'; return fail(S, 'collision', 'lowered'); }
       if (sh.x <= GEOM.shipClearX) {
         sh.state = 'leaving';
         S.shipsPassed++;
@@ -899,7 +928,7 @@ function stepGame(S, dt) {
         S.passedAt = S.elapsed;
         emit('shipPassed', sh.kind);
       }
-    } else if (kindDef.needsLift && shipTouchesLeaf(sh.x, S.bridge)) {
+    } else if (kindDef.needsLift && shipTouchesLeaf(sh.x, S.bridge, S.bridgeFar)) {
       sh.state = 'crashed'; return fail(S, 'collision', 'lowered');
     } else if (sh.x <= GEOM.shipGoneX) {
       S.ship = null;
@@ -907,7 +936,7 @@ function stepGame(S, dt) {
   }
 
   // 6. Road traffic builds up whenever the bridge is not down.
-  S.traffic = clamp(S.traffic + (S.bridge > 0 ? C.trafficFill : -C.trafficDrain) * dt, 0, 1);
+  S.traffic = clamp(S.traffic + (bridgeAny(S) > 0 ? C.trafficFill : -C.trafficDrain) * dt, 0, 1);
   S.peakTraffic = Math.max(S.peakTraffic, S.traffic);
   if (S.traffic >= 1) return fail(S, 'gridlock');
 
@@ -1181,10 +1210,17 @@ const Sfx = (() => {
 // ============================================================
 const W = 1600, H = 580;
 const ROAD_Y = 392, WATER_Y = 470;
-const PIVOT_X = 1080, PIVOT_Y = 400, LEAF_LEN = 290, LEAF_MAX = 78 * Math.PI / 180;
+const PIVOT_X = 1080, PIVOT_Y = 400, LEAF_LEN = GEOM.leafLen, LEAF_MAX = 78 * Math.PI / 180;
 const PIER_FACE = 1130;
-const STOP_X = 800, HEEL_X = 1058, TIP_FADE = 1300;
-const MAL_SPOTS = { valve: { x: 693, y: 505 }, leak: { x: 400, y: 445 } };
+// The north pier is a mirror image of the south one about MIRROR_X, halfway between the pivots.
+const FAR_PIVOT_X = GEOM.farPivotX, FAR_PIER_FACE = GEOM.farPierFace, MIRROR_X = (PIVOT_X + FAR_PIVOT_X) / 2;
+const FAR_ROAD_X = 2 * MIRROR_X - (PIVOT_X - 14); // where the north leaf's heel meets the fixed road
+const STOP_X = 800, HEEL_X = 1058, TIP_FADE = 1540;
+const MAL_SPOTS = {
+  valve: { x: 693, y: 505 }, leak: { x: 400, y: 445 },
+  engineSouth: { x: 1016, y: 482 }, engineNorth: { x: 2 * MIRROR_X - 1016, y: 482 },
+};
+function mirror(g) { g.translate(2 * MIRROR_X, 0); g.scale(-1, 1); }
 const GAUGE = { x: 82, y: 478, r: 48 };
 const FLY = { x: 395, y: 505, r: 56, crank: 28, rod: 110 };
 const LUBE = { x: 598, y: 450, r: 18 };
@@ -1203,6 +1239,7 @@ const PIPES = [
   { id: 'feed', kind: 'water', pts: [[606, 523], [606, 566], [238, 566], [238, 553]] },
   { id: 'pump', kind: 'water', pts: [[766, 462], [790, 462], [790, 563], [929, 563]] },
   { id: 'pier', kind: 'water', pts: [[929, 563], [1098, 563], [1098, 556]] },
+  { id: 'walk', kind: 'water', pts: [[1098, 563], [1126, 563], [1126, 84], [1454, 84], [1454, 563], [1482, 563], [1482, 556]] },
 ];
 for (const p of PIPES) {
   p.seg = [];
@@ -1224,8 +1261,8 @@ const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-mo
 let S = createState();
 const V = {
   s: 1, k: 0, t: 0,
-  pressureShown: 0, oilShown: CONFIG.oilStart, accShown: CONFIG.accumStart, bridgeShown: 0,
-  coalHint: 0, oilHint: 0, lastCoalT: -99, lastOilT: -99, fire: 0.1, flow: { steam: 0, feed: 0, pump: 0, pier: 0 },
+  pressureShown: 0, oilShown: CONFIG.oilStart, accShown: CONFIG.accumStart, bridgeShown: 0, bridgeFarShown: 0,
+  coalHint: 0, oilHint: 0, lastCoalT: -99, lastOilT: -99, fire: 0.1, flow: { steam: 0, feed: 0, pump: 0, pier: 0, walk: 0 },
   stoke: 0, sparkAt: -1, drops: [],
   shake: 0, leafShake: 0, crashT: 0,
   stopShow: 0, puffT: 0, halfRevs: 0,
@@ -1257,7 +1294,7 @@ function box(g, x, y, w, h, fill, stroke, lw) {
   if (stroke) { g.strokeStyle = stroke; g.lineWidth = lw || 1.6; g.strokeRect(x, y, w, h); }
 }
 const smooth = (t) => t * t * (3 - 2 * t);
-const leafAngle = () => LEAF_MAX * smooth(clamp(V.bridgeShown, 0, 1));
+const leafAngle = (frac) => LEAF_MAX * smooth(clamp(frac, 0, 1));
 const accTop = (c) => 452 - 162 * c;
 
 // ---------- cached background layer ----------
@@ -1307,6 +1344,26 @@ function drawBackground(g) {
   g.fillStyle = '#f4f3ef'; g.fillRect(988, 404, 134, 170);
   g.strokeStyle = '#6f6e6a'; g.lineWidth = 2; g.strokeRect(988, 404, 134, 170);
   g.fillStyle = '#dcdbd6'; g.fillRect(989, 569, 132, 5);
+
+  // the north pier, drawn as the mirror image of the south one
+  g.save(); mirror(g);
+  g.fillStyle = '#b4b3af'; g.fillRect(975, ROAD_Y, PIER_FACE - 975, H - ROAD_Y);
+  g.strokeStyle = 'rgba(40,40,35,0.09)'; g.lineWidth = 1;
+  for (let y = ROAD_Y + 20, row = 0; y < H; y += 14, row++) {
+    line(g, 975, y, PIER_FACE, y);
+    for (let x = 975 + (row % 2) * 22; x < PIER_FACE; x += 44) line(g, x, y, x, y + 14);
+  }
+  g.strokeStyle = '#6d6c68'; g.lineWidth = 2; line(g, PIER_FACE, ROAD_Y, PIER_FACE, H);
+  g.fillStyle = '#7b7a76'; g.fillRect(975, ROAD_Y, 1066 - 975, 8);
+  g.fillStyle = '#4b4a47'; g.fillRect(975, ROAD_Y, 1066 - 975, 2);
+  g.strokeStyle = '#c9c8c3'; g.lineWidth = 1.5;
+  line(g, 975, ROAD_Y - 11, 1066, ROAD_Y - 11);
+  for (let x = 978; x < 1066; x += 18) line(g, x, ROAD_Y - 11, x, ROAD_Y);
+  g.fillStyle = '#f4f3ef'; g.fillRect(988, 404, 134, 170);
+  g.strokeStyle = '#6f6e6a'; g.lineWidth = 2; g.strokeRect(988, 404, 134, 170);
+  g.fillStyle = '#dcdbd6'; g.fillRect(989, 569, 132, 5);
+  g.restore();
+  lamp(g, 1572);
 }
 
 function vault(g, x, y, w, h) {
@@ -1352,12 +1409,17 @@ function spire(g, x, base, h) {
 
 function drawTowerBg(g) {
   const c1 = '#d5d4cf', c2 = '#c7c6c1', ln = '#bab9b4';
-  // high-level walkway to the far tower
-  g.fillStyle = c1; g.fillRect(1128, 60, W - 1128, 9); g.fillRect(1128, 92, W - 1128, 7);
+  // high-level walkways between the two towers
+  const span = FAR_PIER_FACE + 2 - 1128;
+  g.fillStyle = c1; g.fillRect(1128, 60, span, 9); g.fillRect(1128, 92, span, 7);
   g.strokeStyle = c2; g.lineWidth = 2;
   g.beginPath();
-  for (let x = 1130, up = true; x < W; x += 16, up = !up) { if (x === 1130) g.moveTo(x, 92); g.lineTo(x + 16, up ? 69 : 92); }
+  for (let x = 1130, up = true; x < FAR_PIER_FACE; x += 16, up = !up) { if (x === 1130) g.moveTo(x, 92); g.lineTo(Math.min(x + 16, FAR_PIER_FACE), up ? 69 : 92); }
   g.stroke();
+  drawTowerBody(g, c1, c2, ln);
+  g.save(); mirror(g); drawTowerBody(g, c1, c2, ln); g.restore();
+}
+function drawTowerBody(g, c1, c2, ln) {
   // suspension chain and hangers
   g.strokeStyle = c2; g.lineWidth = 4;
   g.beginPath(); g.moveTo(992, 118); g.quadraticCurveTo(900, 380, 706, 340); g.stroke();
@@ -1409,10 +1471,18 @@ function drawStationTitles(g) {
     ['2', 452, ['STEAM PUMPING', 'ENGINES']],
     ['3', 700, ['HYDRAULIC', 'PUMPS']],
     ['4', 896, ['ACCUMULATORS']],
-    ['5', 1059, ['BASCULE DRIVE', 'ENGINES']],
+    ['5', 1059, ['BASCULE DRIVE', 'SOUTH PIER']],
+    [null, 1528, ['BASCULE DRIVE', 'NORTH PIER']],
   ];
   const k = V.k;
   for (const [n, x, label] of stations) {
+    if (n === null) {
+      g.font = '12.5px ' + SERIF; g.textAlign = 'center'; g.fillStyle = '#7b7a76';
+      try { g.letterSpacing = '1.5px'; } catch (e) { /* unsupported */ }
+      label.forEach((l, i) => g.fillText(l, x, 196 + i * 14));
+      try { g.letterSpacing = '0px'; } catch (e) { /* unsupported */ }
+      continue;
+    }
     // Stencil numeral: draw on a scratch canvas and cut the bridges out of it.
     const sc = document.createElement('canvas');
     sc.width = Math.ceil(90 * k); sc.height = Math.ceil(96 * k);
@@ -1504,7 +1574,11 @@ function drawForeground(g) {
     g.strokeStyle = INK; g.lineWidth = 1.6; circle(g, x, y - 1, 6); g.fillStyle = '#e9e9e5'; g.fill(); g.stroke();
     line(g, x - 6, y - 1, x + 6, y - 1); line(g, x, y - 7, x, y + 5);
   });
-  // Station 5: bascule drive engine cylinder
+  // Station 5: the bascule drive engine cylinder in each pier
+  drawDriveCylinder(g);
+  g.save(); mirror(g); drawDriveCylinder(g); g.restore();
+}
+function drawDriveCylinder(g) {
   box(g, 1072, 532, 48, 22, '#cfcfcb', INK, 1.8);
   box(g, 1069, 529, 5, 28, '#9d9d99', INK, 1);
   box(g, 1078, 554, 38, 15, '#c1c1bd', INK, 1.2);
@@ -1512,7 +1586,7 @@ function drawForeground(g) {
 
 // ---------- per-frame drawing ----------
 function drawWater(g) {
-  g.fillStyle = '#cdceca'; g.fillRect(PIER_FACE, WATER_Y, W - PIER_FACE, H - WATER_Y);
+  g.fillStyle = '#cdceca'; g.fillRect(PIER_FACE, WATER_Y, FAR_PIER_FACE - PIER_FACE, H - WATER_Y);
   g.strokeStyle = '#6f6f6c'; g.lineCap = 'round';
   for (let i = 0; i < 8; i++) {
     const y0 = WATER_Y + 2 + i * 14;
@@ -1520,7 +1594,7 @@ function drawWater(g) {
     g.lineWidth = i === 0 ? 2 : 2.4;
     g.globalAlpha = i === 0 ? 0.75 : 0.9;
     g.beginPath();
-    for (let x = PIER_FACE + 2; x <= W; x += 6) {
+    for (let x = PIER_FACE + 2; x <= FAR_PIER_FACE; x += 6) {
       const y = y0 + 2.6 * Math.sin(x * 0.07 + V.t * dir + i * 1.7);
       if (x === PIER_FACE + 2) g.moveTo(x, y); else g.lineTo(x, y);
     }
@@ -1542,7 +1616,7 @@ function drawShip(g, sh) {
   const bob = Math.sin(V.t * 1.3 + sh.id) * 1.6;
   const tilt = sh.state === 'crashed' ? Math.min(0.09, V.crashT * 0.12) : Math.sin(V.t * 0.9 + sh.id) * 0.012;
   g.save();
-  g.beginPath(); g.rect(PIER_FACE + 1, 0, W - PIER_FACE, H); g.clip();
+  g.beginPath(); g.rect(PIER_FACE + 1, 0, FAR_PIER_FACE - PIER_FACE - 2, H); g.clip();
   g.translate(sh.x, WATER_Y + 4 + bob);
   g.rotate(tilt);
   const kind = sh.kind || 'tall';
@@ -1644,8 +1718,8 @@ function drawGear(g, x, y, r, teeth, ang, spokes) {
   g.restore();
 }
 
-function drawBridge(g) {
-  const a = leafAngle();
+function drawBridge(g, frac) {
+  const a = leafAngle(frac);
   const wob = V.leafShake > 0 ? Math.sin(V.t * 55) * 0.014 * V.leafShake : 0;
   const th = -a + wob;
   // counterweight, quadrant rack and gearing inside the pier (clipped to the chamber)
@@ -1718,7 +1792,7 @@ function makePed(x) {
   return { kind, len: 14, speed: rand(18, 26), v: 20, x: x === undefined ? -18 : x, ph: rand(0, TAU), roll: 0, alpha: 1, fade: false, moving: true, parasol: Math.random() < 0.35 };
 }
 
-function roadClosed() { return S.bridge > 0 || S.leverUp || V.bridgeShown > 0.002; }
+function roadClosed() { return bridgeAny(S) > 0 || S.leverUp || Math.max(V.bridgeShown, V.bridgeFarShown) > 0.002; }
 
 function updateLane(list, gap, dt, queueCap) {
   const closed = roadClosed();
@@ -1737,7 +1811,8 @@ function updateLane(list, gap, dt, queueCap) {
     const front = v.x + v.len;
     let limit = Infinity;
     if (closed) {
-      if (front <= STOP_X + 0.5) limit = STOP_X;
+      if (v.x >= FAR_ROAD_X) { /* already across, on the north road */ }
+      else if (front <= STOP_X + 0.5) limit = STOP_X;
       else if (front <= HEEL_X + 0.5) limit = HEEL_X;
       else v.fade = true;
     } else if (held && held.has(v)) {
@@ -2200,7 +2275,8 @@ function render() {
   g.drawImage(bgLayer, 0, 0, W, H);
   if (S.ship) drawShip(g, S.ship);
   drawWater(g);
-  drawBridge(g);
+  drawBridge(g, V.bridgeShown);
+  g.save(); mirror(g); drawBridge(g, V.bridgeFarShown); g.restore();
   drawTraffic(g);
   drawStop(g);
   drawAccumulators(g);
@@ -2286,9 +2362,11 @@ function updateSigns() {
 
   const m = S.malfunction;
   if (live && m) {
-    const label = m.type === 'valve' ? ['STUCK VALVE!', 'CLICK IT LOOSE!'] : ['PIPE LEAK!', 'PATCH IT UP!'];
+    const label = m.type === 'valve' ? ['STUCK VALVE!', 'CLICK IT LOOSE!']
+      : m.type === 'leak' ? ['PIPE LEAK!', 'PATCH IT UP!']
+      : [`${m.side.toUpperCase()} ENGINE JAMMED!`, 'CLICK TO FREE IT!'];
     setSign(sg.mal, true, label[0], `${label[1]} (${m.hits}/${m.needed})`, true, m.age > C.malfunctionGrace);
-    const spot = m.type === 'valve' ? MAL_SPOTS.valve : MAL_SPOTS.leak;
+    const spot = m.type === 'engine' ? MAL_SPOTS[m.side === 'north' ? 'engineNorth' : 'engineSouth'] : MAL_SPOTS[m.type];
     el.malSpot.style.left = spot.x + 'px';
     el.malSpot.style.top = spot.y + 'px';
     el.malSpot.classList.add('show');
@@ -2306,13 +2384,15 @@ function updateSigns() {
   setSign(sg.traffic, live && S.traffic > C.trafficWarn, 'TRAFFIC BUILDING UP', 'LOWER THE BRIDGE!', true, S.traffic > 0.85);
 
   const moving = S.bridgeMoving;
-  if (live && moving > 0) setSign(sg.bridge, true, 'SAILING UP THE BRIDGE!', '', false, false);
+  const lag = S.bridge - S.bridgeFar;
+  if (live && Math.abs(lag) > 0.2) setSign(sg.bridge, true, 'LEAVES OUT OF STEP', `THE ${lag < 0 ? 'SOUTH' : 'NORTH'} LEAF IS LAGGING`, true, false);
+  else if (live && moving > 0) setSign(sg.bridge, true, 'SAILING UP THE BRIDGE!', '', false, false);
   else if (live && moving < 0) setSign(sg.bridge, true, 'LOWERING THE BRIDGE', '', false, false);
   else setSign(sg.bridge, false);
 
   if (live && sh && sh.state === 'approach') {
     const kindDef = SHIP_KINDS[sh.kind];
-    const up = S.bridge >= C.fullyUp;
+    const up = bridgeOpen(S) >= C.fullyUp;
     const title = kindDef.urgent ? 'FIRE TUG APPROACHING!' : kindDef.grand ? 'THE ROYAL BARGE APPROACHES' : 'BOAT APPROACHING';
     const body = !shNeedsLift ? 'SHE RIDES LOW - NO NEED TO LIFT' : up ? 'THE WAY IS CLEAR!' : 'LIFT THE BRIDGE!';
     setSign(sg.boat, true, title, body, kindDef.urgent, kindDef.urgent || (!up && shNeedsLift && sh.x - GEOM.shipDangerX < sh.speed * 5));
@@ -2323,7 +2403,7 @@ function updateSigns() {
   } else if (live && sh && sh.state === 'passing') {
     setSign(sg.boat, true, shNeedsLift ? 'SHIP PASSING' : 'BOAT PASSING', shNeedsLift ? 'KEEP THE BRIDGE UP!' : '', false, false);
     el.track.style.display = 'none';
-  } else if (live && S.bridge > 0 && S.leverUp && S.elapsed - S.passedAt < 12) {
+  } else if (live && bridgeAny(S) > 0 && S.leverUp && S.elapsed - S.passedAt < 12) {
     setSign(sg.boat, true, 'SHIP HAS PASSED', 'LOWER THE BRIDGE!', false, false);
     el.track.style.display = 'none';
   } else setSign(sg.boat, false);
@@ -2590,7 +2670,9 @@ function onGameEvent(type, data) {
     case 'repairHit': Sfx.clank(); break;
     case 'malfunctionStart':
       Sfx.malfunctionStart();
-      say(data === 'valve' ? 'A valve has stuck! Click it loose.' : 'A pipe is leaking! Patch it up.');
+      say(data === 'valve' ? 'A valve has stuck! Click it loose.'
+        : data === 'leak' ? 'A pipe is leaking! Patch it up.'
+        : `The ${S.malfunction.side} bascule engine has jammed! Click it free.`);
       break;
     case 'malfunctionPenalty': Sfx.malfunctionPenalty(); V.shake = Math.max(V.shake, 2); break;
     case 'malfunctionFixed': Sfx.malfunctionFixed(); say('Fixed!'); break;
@@ -2849,9 +2931,11 @@ function update(dt) {
   V.pressureShown = approach(V.pressureShown, active ? (S.failReason === 'burst' ? 244 : S.pressure) : 0, dt * 160);
   V.oilShown = approach(V.oilShown, S.oil, dt * 1.4);
   V.accShown = approach(V.accShown, S.accum, dt * 0.5);
-  const prevBridge = V.bridgeShown;
+  const prevBridge = V.bridgeShown, prevFar = V.bridgeFarShown;
   V.bridgeShown = approach(V.bridgeShown, S.bridge, dt * 0.35);
-  const bridgeMoving = Math.abs(V.bridgeShown - prevBridge) > 1e-5;
+  V.bridgeFarShown = approach(V.bridgeFarShown, S.bridgeFar, dt * 0.35);
+  const bridgeMoving = Math.abs(V.bridgeShown - prevBridge) > 1e-5 || Math.abs(V.bridgeFarShown - prevFar) > 1e-5;
+  const bridgeRising = V.bridgeShown + V.bridgeFarShown > prevBridge + prevFar;
   V.stopShow = approach(V.stopShow, roadClosed() ? 1 : 0, dt * 4);
   const fireTarget = !active || S.failReason === 'steam' ? 0.08 : clamp(S.pressure / 190, 0.05, 1) + (S.coalBurns.length ? 0.35 : 0);
   V.fire = approach(V.fire, fireTarget, dt * 1.5);
@@ -2863,7 +2947,8 @@ function update(dt) {
   V.flow.steam += revs * 55 * dt;
   V.flow.feed += revs * 40 * dt;
   V.flow.pump += (S.phase === 'playing' ? S.pumpEff * (S.accum < 1 ? 1 : 0.2) : revs * 0.3) * 60 * dt;
-  V.flow.pier += (bridgeMoving ? (V.bridgeShown > prevBridge ? 70 : -45) : 0) * dt;
+  V.flow.pier += (bridgeMoving ? (bridgeRising ? 70 : -45) : 0) * dt;
+  V.flow.walk += (bridgeMoving ? (bridgeRising ? 70 : -45) : 0) * dt;
 
   // chuffs, sparks, steam, drops
   const half = Math.floor(S.crank / Math.PI);
