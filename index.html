@@ -651,8 +651,8 @@ const CONFIG = {
   // Ships
   firstShipMin: 10,
   firstShipMax: 14,
-  shipIntervalMin: 46,        // seconds between ships that need a lift, so the road gets a
-  shipIntervalMax: 56,        // proper spell open between closures
+  shipIntervalMin: 40,        // seconds between ships that need a lift, so the road gets a
+  shipIntervalMax: 50,        // proper spell open between closures
   shipIntervalRamp: 0.9,      // interval multiplier reached at 00:00
   smallBoatGapMul: 0.4,       // a small boat (no lift) only uses up this share of a gap
   approachTimeStart: 13,      // seconds from sighting to reaching the bridge
@@ -686,8 +686,8 @@ const CONFIG = {
   motorSpinDown: 1.5,
   motorReady: 0.9,            // share of full speed needed to start a lift
   motorHeatStart: 0.2,
-  motorHeatIdle: 0.009,       // per second running
-  motorHeatWork: 0.04,        // extra per second while the leaves move
+  motorHeatIdle: 0.007,       // per second running
+  motorHeatWork: 0.034,       // extra per second while the leaves move
   motorCool: 0.035,           // per second switched off
   motorHotWarn: 0.75,
   motorTripTime: 10,          // seconds a tripped motor must cool before it can be restarted
@@ -730,6 +730,14 @@ const GEOM = {
     tall: [[-14, 14], [-24, -6], [-28, -30], [-41, -72], [-46, -116], [-38, -159], [-30, -193], [-20, -214],
       [-2, -236], [4, -236], [20, -214], [30, -193], [38, -159], [46, -116], [41, -72], [28, -30], [24, -6], [14, 14]],
     tug: [[-14, 12], [-27, 2], [-34, -26], [-18, -60], [-8, -90], [14, -100], [14, -60], [34, -26], [27, 2], [14, 12]],
+    barge: [[-26, 8], [-34, -4], [-30, -30], [-24, -40], [-30, -100], [-28, -170], [-18, -206], [4, -210], [28, -172], [32, -100],
+      [28, -40], [30, -30], [34, -4], [26, 8]],
+    steamer: [[-28, 8], [-40, -2], [-54, -14], [-50, -30], [-28, -34], [-26, -52], [-9, -54], [-9, -130], [-2, -132], [-2, -162],
+      [2, -162], [2, -132], [9, -130], [9, -54], [26, -52], [28, -34], [50, -30], [54, -14], [40, -2], [28, 8]],
+    cruise: [[-40, 10], [-48, -10], [-46, -34], [-40, -62], [-34, -86], [-26, -104], [-9, -106], [-9, -130], [-2, -132], [-2, -148],
+      [2, -148], [2, -132], [9, -130], [9, -106], [26, -104], [34, -86], [40, -62], [46, -34], [48, -10], [40, 10]],
+    yacht: [[-18, 8], [-26, -8], [-24, -30], [-20, -50], [-14, -66], [-10, -92], [-2, -122], [2, -122], [10, -92], [14, -66],
+      [20, -50], [24, -30], [26, -8], [18, 8]],
   },
 };
 const smoothStep = (t) => t * t * (3 - 2 * t);
@@ -766,8 +774,9 @@ function leafTouchesShip(outline, scale, frac, north) {
   return false;
 }
 function shipTouchesLeaf(kind, south, north) {
-  const outline = kind === 'urgent' ? GEOM.bowOutlines.tug : GEOM.bowOutlines.tall;
-  const scale = kind === 'grand' ? 1.22 : 1;
+  const kd = SHIP_KINDS[kind];
+  const outline = GEOM.bowOutlines[kd.outline || 'tall'];
+  const scale = kd.scale || 1;
   return leafTouchesShip(outline, scale, south, false) || leafTouchesShip(outline, scale, north, true);
 }
 // How far both leaves are open (the lesser) / whether either is open at all.
@@ -777,17 +786,24 @@ const bridgeAny = (S) => Math.max(S.bridge, S.bridgeFar);
 let emit = () => {};
 function setEmitter(fn) { emit = fn; }
 
-// Kinds of vessel. A small boat rides low enough to pass under a closed bridge and
-// never needs the leaf raised at all; everything else does. approachMul/passMul scale
-// the usual timings; urgent ships give far less warning, grand ones move more slowly.
+// Kinds of vessel that need the bridge raised. approachMul/passMul scale the usual
+// timings: urgent ships give far less warning, big ones move more slowly. outline/scale
+// pick the collision shape (GEOM.bowOutlines); eras limits a kind to one bridge. Small
+// craft that pass under the closed bridge are river scenery in the view (see V.boats);
+// 'small' is kept only so older schedules still read, and is never picked.
 const SHIP_KINDS = {
-  small:  { weight: 3,   needsLift: false, approachMul: 1.15, passMul: 1.25, label: 'A SMALL BOAT' },
-  tall:   { weight: 6,   needsLift: true,  approachMul: 1,     passMul: 1,    label: 'A SHIP' },
-  grand:  { weight: 1.3, needsLift: true,  approachMul: 1.3,   passMul: 0.7,  label: 'A ROYAL BARGE', grand: true },
-  urgent: { weight: 1.3, needsLift: true,  approachMul: 0.42,  passMul: 1.3,  label: 'A FIRE TUG', urgent: true },
+  small:   { weight: 0,   needsLift: false, approachMul: 1.15, passMul: 1.25, label: 'A SMALL BOAT', title: 'BOAT APPROACHING' },
+  tall:    { weight: 5,   needsLift: true,  approachMul: 1,    passMul: 1,    label: 'A TALL SHIP', title: 'SHIP APPROACHING' },
+  grand:   { weight: 1.3, needsLift: true,  approachMul: 1.3,  passMul: 0.7,  label: 'THE ROYAL BARGE', title: 'ROYAL BARGE AHEAD!', grand: true, scale: 1.22 },
+  urgent:  { weight: 1.3, needsLift: true,  approachMul: 0.42, passMul: 1.3,  label: 'A FIRE TUG', title: 'FIRE TUG – HURRY!', urgent: true, outline: 'tug' },
+  barge:   { weight: 3,   needsLift: true,  approachMul: 1.1,  passMul: 0.9,  label: 'A SAILING BARGE', title: 'BARGE APPROACHING', outline: 'barge', eras: ['victorian'] },
+  steamer: { weight: 3,   needsLift: true,  approachMul: 0.9,  passMul: 1.1,  label: 'A PADDLE STEAMER', title: 'STEAMER AHEAD!', outline: 'steamer', eras: ['victorian'] },
+  cruise:  { weight: 2.5, needsLift: true,  approachMul: 1.25, passMul: 0.75, label: 'A CRUISE SHIP', title: 'CRUISE SHIP AHEAD', outline: 'cruise', eras: ['modern'] },
+  yacht:   { weight: 3,   needsLift: true,  approachMul: 0.85, passMul: 1.15, label: 'A SUPERYACHT', title: 'YACHT APPROACHING', outline: 'yacht', eras: ['modern'] },
 };
-function pickShipKind(allowUrgent) {
-  const names = Object.keys(SHIP_KINDS).filter((n) => allowUrgent || !SHIP_KINDS[n].urgent);
+function pickShipKind(allowUrgent, era = 'victorian') {
+  const names = Object.keys(SHIP_KINDS).filter((n) => SHIP_KINDS[n].weight > 0 && (allowUrgent || !SHIP_KINDS[n].urgent) &&
+    (!SHIP_KINDS[n].eras || SHIP_KINDS[n].eras.includes(era)));
   const total = names.reduce((a, n) => a + SHIP_KINDS[n].weight, 0);
   let r = Math.random() * total;
   for (const n of names) { r -= SHIP_KINDS[n].weight; if (r <= 0) return n; }
@@ -797,7 +813,7 @@ function pickShipKind(allowUrgent) {
 // The elapsed-time (seconds) and kind of each ship to appear this game. The first ship
 // is always an ordinary one, and the second is never the urgent kind, so the player
 // meets the basic mechanic before facing a tight deadline.
-function generateShipSchedule() {
+function generateShipSchedule(era) {
   const C = CONFIG;
   const sched = [];
   let t = rand(C.firstShipMin, C.firstShipMax);
@@ -805,7 +821,7 @@ function generateShipSchedule() {
     const k = clamp(t / C.gameDuration, 0, 1);
     const approachTime = lerp(C.approachTimeStart, C.approachTimeEnd, k);
     if (C.gameDuration - t <= approachTime + 1) break;
-    const kind = sched.length === 0 ? 'tall' : pickShipKind(sched.length >= 2);
+    const kind = sched.length === 0 ? 'tall' : pickShipKind(sched.length >= 2, era);
     sched.push({ t, kind });
     t += shipGap(kind, lerp(1, C.shipIntervalRamp, k));
   }
@@ -828,7 +844,7 @@ function createState(era = 'victorian') {
     bridge: 0, bridgeFar: 0, leverUp: false, bridgeMoving: 0, stalled: false,
     gatesClosed: false, deckClearIn: 0, blockHint: null, blockHintT: 0,
     ship: null, shipCount: 0, shipsPassed: 0, grandPassed: 0, urgentPassed: 0, passedAt: -99,
-    shipSchedule: generateShipSchedule(), nextShipIdx: 0,
+    shipSchedule: generateShipSchedule(era), nextShipIdx: 0,
     traffic: 0, peakTraffic: 0, trafficSum: 0,
     careTime: 0, faultPenalties: 0, upSince: null, shipMargins: [],
     failReason: null, failTimer: 0, failNote: null,
@@ -1166,7 +1182,7 @@ function extendShipSchedule(S) {
   while (S.shipSchedule.length - S.nextShipIdx < 2) {
     const prev = S.shipSchedule[S.shipSchedule.length - 1];
     const t = prev ? Math.max(prev.t + shipGap(prev.kind, C.shipIntervalRamp), S.elapsed) : S.elapsed + shipGap('tall', C.shipIntervalRamp);
-    S.shipSchedule.push({ t, kind: pickShipKind(true) });
+    S.shipSchedule.push({ t, kind: pickShipKind(true, S.era) });
   }
 }
 // ==== CORE END ====
@@ -1481,7 +1497,7 @@ const V = {
   shake: 0, leafShake: 0, crashT: 0,
   stopShow: 0, puffT: 0, halfRevs: 0,
   leverAngle: -48, leverDrag: null,
-  cars: [], peds: [], carT: 0, pedT: 0,
+  cars: [], peds: [], carT: 0, pedT: 0, boats: [], boatT: 2,
   lastSecond: -1, failShownAt: 0,
   shiplogIdx: [],
 };
@@ -1880,7 +1896,13 @@ function shipView(sh) {
   return { scale: lerp(1.1, 1.5, r), y: lerp(WATER_Y + 6, WATER_Y + 70, r), alpha: 1 - r, front: true };
 }
 
-function drawShip(g, sh) {
+const BOW_DRAW = {
+  small: drawSkiffBow, skiff: drawSkiffBow, rowboat: drawRowboatBow, launch: drawLaunchBow, clipper: drawClipperBow, rib: drawRibBow,
+  tall: (g) => drawTallShipBow(g, false), grand: (g) => drawTallShipBow(g, true), urgent: drawTugBow,
+  barge: drawBargeBow, steamer: drawSteamerBow, cruise: drawCruiseBow, yacht: drawYachtBow,
+};
+// A ship or boat (anything with x along the river, an id and a kind), off-centre by lat.
+function drawShip(g, sh, lat = 0) {
   const v = shipView(sh);
   const bob = Math.sin(V.t * 1.3 + sh.id) * 1.6 * v.scale;
   const tilt = sh.state === 'crashed' ? Math.min(0.09, V.crashT * 0.12) : Math.sin(V.t * 0.9 + sh.id) * 0.02;
@@ -1888,14 +1910,37 @@ function drawShip(g, sh) {
   // Seen through the opening; once in front of the bridge its hull is cut at its own waterline.
   g.beginPath(); g.rect(PIER_FACE + 1, 0, FAR_PIER_FACE - PIER_FACE - 2, v.front ? v.y + 2 : H); g.clip();
   g.globalAlpha = v.alpha;
-  g.translate(GAP_X, v.y + bob);
+  g.translate(GAP_X + lat * v.scale, v.y + bob);
   g.scale(v.scale, v.scale);
   g.rotate(tilt);
-  const kind = sh.kind || 'tall';
-  if (kind === 'small') drawSkiffBow(g);
-  else if (kind === 'urgent') drawTugBow(g);
-  else drawTallShipBow(g, kind === 'grand');
+  (BOW_DRAW[sh.kind] || BOW_DRAW.tall)(g);
   g.restore();
+}
+// Everything on the river, furthest first, split by whether it's past the bridge yet.
+function vessels(front) {
+  const all = V.boats.map((b) => ({ sh: b, lat: b.lat }));
+  if (S.ship) all.push({ sh: S.ship, lat: 0 });
+  return all.filter((o) => shipView(o.sh).front === front).sort((a, b) => b.sh.x - a.sh.x);
+}
+
+// ---- small craft: river scenery that passes under the closed bridge, several at a time ----
+const BOAT_KINDS = MODERN ? ['clipper', 'clipper', 'rib', 'skiff'] : ['skiff', 'rowboat', 'rowboat', 'launch'];
+function updateBoats(dt) {
+  if (S.phase === 'playing' || S.phase === 'title') {
+    V.boatT -= dt;
+    if (V.boatT <= 0) {
+      if (V.boats.length < 4) {
+        V.boats.push({ id: rand(0, 100), kind: BOAT_KINDS[(Math.random() * BOAT_KINDS.length) | 0], x: GEOM.shipSpawnX,
+          speed: rand(22, 32), lat: rand(-75, 75) });
+      }
+      V.boatT = rand(4, 9);
+    }
+  }
+  for (let i = V.boats.length - 1; i >= 0; i--) {
+    const b = V.boats[i];
+    b.x -= b.speed * dt * (b.x < GEOM.shipDangerX ? 1.6 : 1);
+    if (b.x <= GEOM.shipGoneX) V.boats.splice(i, 1);
+  }
 }
 
 // A square sail seen from ahead, bellied out towards us.
@@ -1959,6 +2004,124 @@ function drawTugBow(g) {
   g.moveTo(-34, -26); g.quadraticCurveTo(0, -32, 34, -26); g.lineTo(27, 2); g.quadraticCurveTo(0, 14, -27, 2); g.closePath();
   g.fillStyle = '#4a4644'; g.fill(); g.strokeStyle = '#221f1e'; g.lineWidth = 1.4; g.stroke();
   g.fillStyle = '#8f8b86'; g.fillRect(-32, -20, 64, 4);
+}
+
+// A Thames sailing barge: one great tan spritsail, a topsail and a foresail, leeboards on her flanks.
+function drawBargeBow(g) {
+  g.strokeStyle = '#3e3e3c'; g.lineWidth = 3; line(g, 0, -26, 0, -206);
+  g.fillStyle = '#9a5a3c'; g.strokeStyle = '#5e3322'; g.lineWidth = 1.2;
+  g.beginPath(); g.moveTo(2, -196); g.lineTo(26, -170); g.quadraticCurveTo(31, -100, 25, -40); g.lineTo(2, -36); g.closePath(); g.fill(); g.stroke();
+  g.beginPath(); g.moveTo(-2, -204); g.lineTo(-2, -150); g.lineTo(-18, -162); g.closePath(); g.fill(); g.stroke();
+  g.fillStyle = '#b07050';
+  g.beginPath(); g.moveTo(-2, -140); g.lineTo(-2, -38); g.lineTo(-24, -40); g.closePath(); g.fill(); g.stroke();
+  g.strokeStyle = '#4a3a30'; g.lineWidth = 1.6; line(g, 2, -190, 24, -58);   // the sprit
+  g.fillStyle = '#b8443c';
+  const w = Math.sin(V.t * 6) * 2;
+  g.beginPath(); g.moveTo(0, -206); g.lineTo(14, -203 + w); g.lineTo(0, -200); g.fill();
+  g.fillStyle = '#2e2a26';
+  g.beginPath(); g.ellipse(-31, -12, 4, 17, 0.15, 0, TAU); g.fill();
+  g.beginPath(); g.ellipse(31, -12, 4, 17, -0.15, 0, TAU); g.fill();
+  g.beginPath();
+  g.moveTo(-28, -30); g.quadraticCurveTo(0, -34, 28, -30); g.lineTo(26, 0); g.quadraticCurveTo(0, 10, -26, 0); g.closePath();
+  g.fillStyle = '#3e3a36'; g.fill(); g.strokeStyle = '#221f1e'; g.lineWidth = 1.4; g.stroke();
+  g.fillStyle = '#8f8b86'; g.fillRect(-27, -24, 54, 3);
+}
+
+// A paddle steamer: tall funnel, a mast behind, paddle boxes out on either side.
+function drawSteamerBow(g) {
+  g.fillStyle = 'rgba(150,150,148,0.5)';
+  for (let i = 0; i < 3; i++) { g.beginPath(); g.arc(Math.sin(V.t * 1.7 + i) * 5 + i * 3, -136 - i * 11 - Math.abs(Math.sin(V.t + i)) * 3, 7 + i * 3, 0, TAU); g.fill(); }
+  g.strokeStyle = '#3e3e3c'; g.lineWidth = 2; line(g, 0, -60, 0, -162); line(g, -12, -146, 12, -146);
+  g.fillStyle = '#2c2a28'; g.fillRect(-9, -130, 18, 80);
+  g.fillStyle = '#c9a256'; g.fillRect(-9, -130, 18, 7);
+  g.fillStyle = '#e8e3d6'; g.strokeStyle = '#3a3632'; g.lineWidth = 1.2;
+  g.fillRect(-26, -54, 52, 22); g.strokeRect(-26, -54, 52, 22);
+  g.fillStyle = '#4a4644'; for (let i = 0; i < 4; i++) g.fillRect(-21 + i * 12, -49, 7, 7);
+  for (const sx of [-1, 1]) {
+    g.beginPath(); g.arc(sx * 38, -14, 16, Math.PI, TAU); g.closePath();
+    g.fillStyle = '#5a5552'; g.fill(); g.strokeStyle = '#221f1e'; g.stroke();
+    g.strokeStyle = '#c9a256'; g.lineWidth = 1; g.beginPath(); g.arc(sx * 38, -14, 11, Math.PI, TAU); g.stroke();
+  }
+  g.beginPath();
+  g.moveTo(-30, -34); g.quadraticCurveTo(0, -40, 30, -34); g.lineTo(26, 0); g.quadraticCurveTo(0, 12, -26, 0); g.closePath();
+  g.fillStyle = '#2f2d2b'; g.fill(); g.strokeStyle = '#1a1817'; g.lineWidth = 1.4; g.stroke();
+  g.fillStyle = '#e8e3d6'; g.fillRect(-29, -30, 58, 3);
+}
+
+// A cruise ship: white tiers of cabins stacked high above a broad hull.
+function drawCruiseBow(g) {
+  g.strokeStyle = '#3e3e3c'; g.lineWidth = 2; line(g, 0, -104, 0, -148); line(g, -10, -140, 10, -140);
+  g.fillStyle = '#d8d7d0'; g.fillRect(-9, -130, 18, 26);
+  g.fillStyle = '#2d4f7a'; g.fillRect(-9, -130, 18, 6);
+  g.strokeStyle = '#5a5a58'; g.lineWidth = 1.2;
+  [[-40, -62, 80, 28], [-34, -86, 68, 24], [-26, -104, 52, 18]].forEach(([x, y, w, h]) => {
+    g.fillStyle = '#f2f1ec'; g.fillRect(x, y, w, h); g.strokeRect(x, y, w, h);
+    g.fillStyle = '#3e4a58'; for (let r = y + 5; r < y + h - 4; r += 9) g.fillRect(x + 4, r, w - 8, 3);
+  });
+  g.beginPath();
+  g.moveTo(-46, -34); g.quadraticCurveTo(0, -40, 46, -34); g.lineTo(40, 0); g.quadraticCurveTo(0, 14, -40, 0); g.closePath();
+  g.fillStyle = '#f2f1ec'; g.fill(); g.strokeStyle = '#5a5a58'; g.lineWidth = 1.4; g.stroke();
+  g.fillStyle = '#2f2f31'; g.beginPath(); g.moveTo(-42, -6); g.quadraticCurveTo(0, 4, 42, -6); g.lineTo(40, 0); g.quadraticCurveTo(0, 14, -40, 0); g.closePath(); g.fill();
+}
+
+// A superyacht: sleek white tiers, a radar arch and a slim mast.
+function drawYachtBow(g) {
+  g.strokeStyle = '#3e3e3c'; g.lineWidth = 1.6; line(g, 0, -66, 0, -122);
+  g.lineWidth = 3; g.beginPath(); g.moveTo(-10, -66); g.quadraticCurveTo(0, -100, 10, -66); g.stroke();
+  g.fillStyle = '#9a9a96'; g.fillRect(-8, -94, 16, 3);
+  g.strokeStyle = '#5a5a58'; g.lineWidth = 1.2;
+  [[-22, -50, 44, 20], [-15, -66, 30, 16]].forEach(([x, y, w, h]) => {
+    g.fillStyle = '#f4f3ef'; rr(g, x, y, w, h, 4); g.fill(); g.stroke();
+    g.fillStyle = '#2b3440'; g.fillRect(x + 3, y + h / 2 - 2, w - 6, 5);
+  });
+  g.beginPath();
+  g.moveTo(-26, -30); g.quadraticCurveTo(0, -34, 26, -30); g.lineTo(20, 0); g.quadraticCurveTo(0, 10, -20, 0); g.closePath();
+  g.fillStyle = '#f4f3ef'; g.fill(); g.strokeStyle = '#5a5a58'; g.lineWidth = 1.4; g.stroke();
+  g.fillStyle = '#2b3440'; g.fillRect(-24, -22, 48, 3);
+}
+
+// A Thames wherry: two rowers at their oars.
+function drawRowboatBow(g) {
+  const s = Math.sin(V.t * 3 + 1) * 4;
+  g.strokeStyle = '#4a4038'; g.lineWidth = 1.6; line(g, -9, -12, -32, -1 + s); line(g, 9, -12, 32, -1 + s);
+  g.fillStyle = '#2c2a28';
+  for (const dx of [-5, 5]) { g.fillRect(dx - 3, -21, 6, 10); circle(g, dx, -24, 3); g.fill(); }
+  g.beginPath();
+  g.moveTo(-16, -10); g.quadraticCurveTo(0, -13, 16, -10); g.lineTo(11, 3); g.quadraticCurveTo(0, 9, -11, 3); g.closePath();
+  g.fillStyle = '#7a6650'; g.fill(); g.strokeStyle = '#2e2620'; g.lineWidth = 1.2; g.stroke();
+}
+
+// A little steam launch: brass-banded funnel and an awning.
+function drawLaunchBow(g) {
+  g.fillStyle = 'rgba(160,160,158,0.5)';
+  g.beginPath(); g.arc(Math.sin(V.t * 2) * 3, -50 - Math.abs(Math.sin(V.t * 1.4)) * 3, 5, 0, TAU); g.fill();
+  g.fillStyle = '#2c2a28'; g.fillRect(-3, -44, 6, 24);
+  g.fillStyle = '#c9a256'; g.fillRect(-3, -44, 6, 3);
+  g.strokeStyle = '#4a4038'; g.lineWidth = 1.2; line(g, -13, -30, -13, -16); line(g, 13, -30, 13, -16);
+  g.fillStyle = '#e8e0cc'; g.fillRect(-16, -32, 32, 4);
+  g.beginPath();
+  g.moveTo(-18, -14); g.quadraticCurveTo(0, -17, 18, -14); g.lineTo(13, 3); g.quadraticCurveTo(0, 10, -13, 3); g.closePath();
+  g.fillStyle = '#e9e5da'; g.fill(); g.strokeStyle = '#3a3632'; g.lineWidth = 1.2; g.stroke();
+}
+
+// A Thames Clipper river bus: a catamaran with a long low cabin.
+function drawClipperBow(g) {
+  g.fillStyle = '#2f2f31';
+  g.beginPath(); g.ellipse(-22, -2, 9, 8, 0, 0, TAU); g.fill();
+  g.beginPath(); g.ellipse(22, -2, 9, 8, 0, 0, TAU); g.fill();
+  g.fillStyle = '#3a3a3c'; g.fillRect(-32, -14, 64, 8);
+  g.fillStyle = '#ecebe6'; rr(g, -27, -33, 54, 20, 7); g.fill(); g.strokeStyle = '#5a5a58'; g.lineWidth = 1.2; g.stroke();
+  g.fillStyle = '#2b3440'; g.fillRect(-23, -27, 46, 7);
+}
+
+// A police RIB: inflatable tubes, a console and a flashing blue light.
+function drawRibBow(g) {
+  g.fillStyle = '#2c2a28';
+  for (const dx of [-5, 5]) { g.fillRect(dx - 3, -22, 6, 9); circle(g, dx, -25, 3); g.fill(); }
+  g.fillStyle = '#4a4a4c'; g.fillRect(-6, -16, 12, 8);
+  g.fillStyle = (V.t * 4) % 1 < 0.5 ? '#3b7bd8' : '#1d3a66'; g.fillRect(-7, -31, 14, 3);
+  g.fillStyle = '#3a3a3c'; g.beginPath(); g.ellipse(0, -4, 17, 7, 0, 0, TAU); g.fill();
+  g.fillStyle = '#e8c874'; g.fillRect(-15, -6, 30, 2);
 }
 
 // A small fishing skiff, head-on: low enough to pass under the closed bridge.
@@ -2160,7 +2323,7 @@ function updateTraffic(dt) {
   }
   if (V.pedT <= 0) {
     let spawn = true, next;
-    if (!closed) next = rand(0.9, 1.6);
+    if (!closed) next = rand(0.3, 0.6);
     else {
       const queued = V.peds.filter((v) => v.x + v.len <= STOP_X + 1).length;
       spawn = queued < Math.round(S.traffic * CONFIG.trafficQueuePedsMax);
@@ -2172,7 +2335,7 @@ function updateTraffic(dt) {
 
 function populateRoad() {
   [140, 620, 1230].forEach((x) => V.cars.push(makeCar(x)));
-  [420].forEach((x) => V.peds.push(makePed(x)));
+  [180, 420, 610, 1300].forEach((x) => V.peds.push(makePed(x)));
 }
 
 function wheel(g, cx, cy, r, rot) {
@@ -2743,11 +2906,11 @@ function render() {
   const sh = reduceMotion ? Math.min(V.shake, 1.5) : V.shake;
   if (sh > 0.05) g.translate(rand(-sh, sh), rand(-sh, sh));
   g.drawImage(bgLayer, 0, 0, W, H);
-  if (S.ship && !shipView(S.ship).front) drawShip(g, S.ship);
+  for (const o of vessels(false)) drawShip(g, o.sh, o.lat);
   drawWater(g);
   drawBridge(g, V.bridgeShown);
   g.save(); mirror(g); drawBridge(g, V.bridgeFarShown); g.restore();
-  if (S.ship && shipView(S.ship).front) drawShip(g, S.ship);
+  for (const o of vessels(true)) drawShip(g, o.sh, o.lat);
   drawTraffic(g);
   drawStop(g);
   if (MODERN) drawReservoir(g); else drawAccumulators(g);
@@ -2916,7 +3079,7 @@ function updateSigns() {
   if (live && sh && sh.state === 'approach') {
     const kindDef = SHIP_KINDS[sh.kind];
     const up = bridgeOpen(S) >= C.fullyUp;
-    const title = kindDef.urgent ? 'FIRE TUG APPROACHING!' : kindDef.grand ? 'THE ROYAL BARGE APPROACHES' : 'BOAT APPROACHING';
+    const title = kindDef.title || 'BOAT APPROACHING';
     const body = !shNeedsLift ? 'SHE RIDES LOW - NO NEED TO LIFT' : up ? 'THE WAY IS CLEAR!' : S.gatesClosed ? 'LIFT THE BRIDGE!' : 'STOP THE TRAFFIC!';
     setSign(sg.boat, true, title, body, kindDef.urgent, kindDef.urgent || (!up && shNeedsLift && sh.x - GEOM.shipDangerX < sh.speed * 5));
     const prog = clamp(1 - (sh.x - GEOM.shipDangerX) / sh.dist, 0, 1);
@@ -3249,7 +3412,7 @@ function onGameEvent(type, data) {
       const kindDef = SHIP_KINDS[data];
       if (kindDef.urgent) { Sfx.siren(); say('A fire tug is approaching fast. Lift the bridge now!'); }
       else if (!kindDef.needsLift) { Sfx.bell(); say('A small boat is approaching. It rides low and needs no lift.'); }
-      else { Sfx.horn(); say(kindDef.grand ? 'The royal barge is approaching. Lift the bridge!' : 'A ship is approaching. Lift the bridge!'); }
+      else { Sfx.horn(); say(`${kindDef.label[0]}${kindDef.label.slice(1).toLowerCase()} is approaching. Lift the bridge!`); }
       break;
     }
     case 'shipArrived': break;
@@ -3573,6 +3736,7 @@ function update(dt) {
   }
 
   updateTraffic(dt);
+  updateBoats(dt);
   updateParticles(dt);
 
   // continuous sounds
