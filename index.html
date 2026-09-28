@@ -248,8 +248,8 @@ button:focus-visible, #lever:focus-visible { outline: 3px solid var(--blue); out
 #btnOil .s { font-size: 23px; letter-spacing: .5px; }
 kbd { position: absolute; right: 8px; bottom: 6px; font: 600 14px/1 var(--serif); color: #8d8d89; border: 1px solid #555; border-radius: 4px; padding: 3px 7px; display: none; }
 @media (hover: hover) and (pointer: fine) { kbd { display: block; } .ctl:hover { filter: brightness(1.15); } }
-#minis { position: absolute; left: 944px; top: 58px; display: flex; gap: 16px; }
-.mini { width: 58px; height: 58px; border-radius: 50%; display: grid; place-items: center; background: radial-gradient(circle at 35% 30%, #4d4d4e, #212122); border: 2px solid #090909; box-shadow: inset 0 2px 0 #444, 0 3px 6px rgba(0,0,0,.5); }
+#minis { position: absolute; left: 6px; top: 34px; display: flex; flex-direction: column; gap: 16px; }
+.mini { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; background: radial-gradient(circle at 35% 30%, #4d4d4e, #212122); border: 2px solid #090909; box-shadow: inset 0 2px 0 #444, 0 3px 6px rgba(0,0,0,.5); }
 .mini svg { width: 28px; height: 28px; fill: #d2d2ce; }
 .mini:active { transform: translateY(2px); }
 .mini .off { display: none; }
@@ -300,22 +300,55 @@ kbd { position: absolute; right: 8px; bottom: 6px; font: 600 14px/1 var(--serif)
 @media (prefers-reduced-motion: reduce) { #rotate .phone { animation: none; transform: rotate(-90deg); } }
 @media (prefers-reduced-motion: reduce) { .sign.urgent .paper, .ctl.nudge .arrow { animation: none; } }
 
-#toOriginal {
-  /* Positioned in the scene's own 1600x580 coordinate space (not viewport-fixed) so it
-     scales and stays put with everything else, clear of the boat/traffic signs above it. */
-  position: absolute; right: 12px; top: 128px; z-index: 5;
-  padding: 6px 12px; border-radius: 6px; font: 600 13px var(--serif); letter-spacing: .3px;
-  color: #d8d3c4; background: rgba(20,20,20,.55); border: 1px solid rgba(255,255,255,.18);
-  text-decoration: none; transition: background .15s, opacity .15s; opacity: .65;
+/* ---------- versions menu ---------- */
+/* Positioned in the scene's own 1600x580 coordinate space so it scales with everything else,
+   clear of the boat/traffic signs above it. */
+#versions { position: absolute; right: 12px; top: 128px; z-index: 12; font: 600 13px var(--serif); letter-spacing: .3px; }
+#versionsBtn {
+  padding: 6px 12px; border-radius: 6px; color: #d8d3c4; background: rgba(20,20,20,.55);
+  border: 1px solid rgba(255,255,255,.18); opacity: .65; transition: background .15s, opacity .15s;
 }
-#toOriginal:hover, #toOriginal:focus-visible { opacity: 1; background: rgba(20,20,20,.8); }
+#versionsBtn:hover, #versionsBtn:focus-visible, #versions.open #versionsBtn { opacity: 1; background: rgba(20,20,20,.85); }
+#versionsMenu {
+  position: absolute; right: 0; top: calc(100% + 6px); min-width: 210px; padding: 6px; border-radius: 6px;
+  background: rgba(20,20,20,.92); border: 1px solid rgba(255,255,255,.18); box-shadow: 0 6px 16px rgba(0,0,0,.4);
+}
+#versionsMenu a, #versionsMenu .cur { display: block; padding: 7px 10px; border-radius: 4px; color: #e6e1d2; text-decoration: none; white-space: nowrap; }
+#versionsMenu a:hover, #versionsMenu a:focus-visible { background: rgba(255,255,255,.12); }
+#versionsMenu .cur { color: #e8c874; }
+#versionsMenu .cur::before { content: '\2713  '; }
+#versionsMenu small { display: block; font-weight: 400; font-size: 11px; color: #9f998b; letter-spacing: 0; margin-top: 2px; }
+
+/* ---------- road gates control ---------- */
+#gates {
+  position: absolute; left: 944px; top: 14px; width: 136px; height: 192px; border-radius: 14px;
+  display: flex; flex-direction: column; align-items: center; color: #efefec; transition: transform .08s, filter .15s;
+}
+#gates .glbl { font-size: 30px; line-height: 1; font-weight: 400; margin-top: 4px; }
+#gates svg { width: 128px; height: 96px; margin-top: 4px; overflow: visible; }
+#gates #gateArm { transform-box: view-box; transform-origin: 24px 44px; transform: rotate(-72deg); transition: transform .45s cubic-bezier(.3,1.4,.5,1); }
+#gates.closed #gateArm { transform: rotate(0deg); }
+#gates #gateLamp { fill: #4a2a22; }
+#gates.closed #gateLamp { fill: #e0452f; filter: drop-shadow(0 0 5px #e0452f); }
+#gates .gstate { font-size: 21px; line-height: 1; font-weight: 400; letter-spacing: .5px; color: #9fb6cf; margin-top: 4px; }
+#gates.closed .gstate { color: #e8604d; }
+#gates.shake svg { animation: shake .45s; }
+#gates.nudge .glbl { animation: nudgeTxt 1s ease-in-out infinite; }
+@keyframes nudgeTxt { 50% { color: #e8c874; } }
+.idle #gates { opacity: .45; }
 </style>
 </head>
 <body class="idle">
 <div id="stage">
   <div id="scene">
     <canvas id="cv" aria-label="Cutaway of Tower Bridge's steam-hydraulic machinery" role="img"></canvas>
-    <a id="toOriginal" href="original.html">ORIGINAL VERSION</a>
+    <div id="versions">
+      <button id="versionsBtn" aria-haspopup="true" aria-expanded="false" aria-controls="versionsMenu">VERSIONS &#9662;</button>
+      <div id="versionsMenu" hidden>
+        <a href="original.html">ORIGINAL VERSION<small>the first build of the game</small></a>
+        <span class="cur">NEW VERSION<small>what you're playing now</small></span>
+      </div>
+    </div>
     <div id="endlessTag" aria-hidden="true">EXTRA TIME</div>
 
     <div id="clock" aria-hidden="true">
@@ -382,11 +415,11 @@ kbd { position: absolute; right: 8px; bottom: 6px; font: 600 14px/1 var(--serif)
         <li><b>1</b><span>Drag coal up into the boiler to keep the needle between 100 and 180 – never in the red.</span></li>
         <li><b>2</b><span>Drag oil up to the glass lubricator before it runs dry.</span></li>
         <li><b>3</b><span>Wait for the accumulator weights to rise past the LIFT mark.</span></li>
-        <li><b>4</b><span>Raise the bridge for each ship, then lower it again for the traffic.</span></li>
+        <li><b>4</b><span>Close the road and wait for the bridge to clear, then raise it for each ship. Lower it and reopen the road after.</span></li>
       </ol>
       <button class="stamp" id="btnStart">START</button>
       <p class="best-line" id="bestLine"></p>
-      <div class="keys">Keys: C coal · O oil · ↑ ↓ bridge · Space start · P pause · M sound</div>
+      <div class="keys">Keys: C coal · O oil · T road gates · ↑ ↓ bridge · Space start · P pause · M sound</div>
     </div></div>
 
     <div class="card" id="cardWin" style="--rot:.5deg"><div class="paper">
@@ -470,6 +503,24 @@ kbd { position: absolute; right: 8px; bottom: 6px; font: 600 14px/1 var(--serif)
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>
       </button>
     </div>
+
+    <button id="gates" aria-label="Stop or release the road traffic (key T)" aria-pressed="false">
+      <span class="glbl">ROAD</span>
+      <svg viewBox="0 0 128 96" aria-hidden="true">
+        <rect x="18" y="30" width="12" height="62" rx="2" fill="#3a3a38" stroke="#111"/>
+        <rect x="10" y="88" width="28" height="7" rx="2" fill="#2a2a28"/>
+        <circle id="gateLamp" cx="24" cy="18" r="7" stroke="#111" stroke-width="1.5"/>
+        <g id="gateArm">
+          <rect x="24" y="39" width="100" height="10" rx="3" fill="#f2f0ea" stroke="#111" stroke-width="1.5"/>
+          <rect x="44" y="39.8" width="16" height="8.4" fill="#c0392b"/>
+          <rect x="76" y="39.8" width="16" height="8.4" fill="#c0392b"/>
+          <rect x="106" y="39.8" width="16" height="8.4" fill="#c0392b"/>
+          <circle cx="24" cy="44" r="7" fill="#b08739" stroke="#5a4418" stroke-width="1.5"/>
+        </g>
+      </svg>
+      <span class="gstate" id="gateState">OPEN</span>
+      <kbd>T</kbd>
+    </button>
 
     <div id="leverBox">
       <svg id="curve" viewBox="0 0 274 84" aria-hidden="true">
@@ -588,11 +639,12 @@ const CONFIG = {
   northEngineRate: 0.85,      // the north leaf's engines are fed across the walkway, so run a little slower
 
   // Road traffic (0–1)
-  trafficFill: 0.014,         // per second while the bridge is not down
+  trafficFill: 0.0095,        // per second while the road is closed
+  deckClearTime: 6,           // seconds, after the gates close, for the last traffic to get off the bridge
   trafficDrain: 0.06,         // per second while it is down
   trafficWarn: 0.7,
-  trafficQueueCarsMax: 8,      // vehicles queued at 100% traffic
-  trafficQueuePedsMax: 4,      // pedestrians queued at 100% traffic
+  trafficQueueCarsMax: 6,      // vehicles queued at 100% traffic
+  trafficQueuePedsMax: 3,      // pedestrians queued at 100% traffic
 
   // Malfunctions: an occasional stuck valve or pipe leak, cleared by clicking it
   // enough times before it starts costing pressure or accumulator charge.
@@ -727,6 +779,7 @@ function createState() {
     accum: CONFIG.accumStart, accumHint: 0,
     malfunction: null, nextMalfunctionIn: rand(CONFIG.malfunctionMinGap, CONFIG.malfunctionMaxGap),
     bridge: 0, bridgeFar: 0, leverUp: false, bridgeMoving: 0, stalled: false,
+    gatesClosed: false, deckClearIn: 0, blockHint: null, blockHintT: 0,
     ship: null, shipCount: 0, shipsPassed: 0, grandPassed: 0, urgentPassed: 0, passedAt: -99,
     shipSchedule: generateShipSchedule(), nextShipIdx: 0,
     traffic: 0, peakTraffic: 0,
@@ -764,16 +817,41 @@ function actOil(S) {
   return true;
 }
 
+function refuse(S, reason, event) {
+  S.blockHint = reason;
+  S.blockHintT = CONFIG.accumHintTime;
+  emit(event, reason);
+  return 'refused';
+}
+
+// The bridge may only start to rise once the road gates are shut and the traffic
+// already on the bridge has got off it.
 function actLever(S, up) {
   if (S.phase !== 'playing') return 'ignored';
   if (up === S.leverUp) return 'same';
-  if (up && bridgeAny(S) <= 0 && S.accum < CONFIG.raiseMinCharge) {
-    S.accumHint = CONFIG.accumHintTime;
-    emit('leverRefused');
-    return 'refused';
+  if (up && bridgeAny(S) <= 0) {
+    if (!S.gatesClosed) return refuse(S, 'gates', 'leverRefused');
+    if (S.deckClearIn > 0) return refuse(S, 'deck', 'leverRefused');
+    if (S.accum < CONFIG.raiseMinCharge) {
+      S.accumHint = CONFIG.accumHintTime;
+      emit('leverRefused', 'accum');
+      return 'refused';
+    }
   }
   S.leverUp = up;
   emit('lever', up);
+  return 'ok';
+}
+
+// Closing the gates stops new traffic coming onto the bridge; they can only be opened
+// again once the bridge is fully down.
+function actGates(S, close) {
+  if (S.phase !== 'playing') return 'ignored';
+  if (close === S.gatesClosed) return 'same';
+  if (!close && (bridgeAny(S) > 0 || S.leverUp)) return refuse(S, 'bridgeUp', 'gatesRefused');
+  S.gatesClosed = close;
+  S.deckClearIn = close ? CONFIG.deckClearTime : 0;
+  emit('gates', close);
   return 'ok';
 }
 
@@ -896,6 +974,8 @@ function stepGame(S, dt) {
     }
   }
   if (S.accumHint > 0) S.accumHint -= dt;
+  if (S.blockHintT > 0) S.blockHintT -= dt;
+  if (S.gatesClosed && S.deckClearIn > 0) S.deckClearIn = Math.max(0, S.deckClearIn - dt);
 
   // 5. Ships, spawned from the pre-generated schedule.
   if (S.continuing) extendShipSchedule(S);
@@ -916,7 +996,8 @@ function stepGame(S, dt) {
     if (sh.x <= GEOM.shipDangerX) {
       if (SHIP_KINDS[sh.kind].needsLift && shipTouchesLeaf(sh.kind, S.bridge, S.bridgeFar)) {
         sh.state = 'crashed';
-        const note = S.enginesOut ? 'engines' : bridgeAny(S) <= 0.05 && S.accum < C.raiseMinCharge ? 'accum' : null;
+        const down = bridgeAny(S) <= 0.05;
+        const note = S.enginesOut ? 'engines' : down && !S.gatesClosed ? 'gates' : down && S.accum < C.raiseMinCharge ? 'accum' : null;
         return fail(S, 'collision', note);
       }
       sh.state = 'passing';
@@ -942,7 +1023,7 @@ function stepGame(S, dt) {
   }
 
   // 6. Road traffic builds up whenever the bridge is not down.
-  S.traffic = clamp(S.traffic + (bridgeAny(S) > 0 ? C.trafficFill : -C.trafficDrain) * dt, 0, 1);
+  S.traffic = clamp(S.traffic + (S.gatesClosed || bridgeAny(S) > 0 ? C.trafficFill : -C.trafficDrain) * dt, 0, 1);
   S.peakTraffic = Math.max(S.peakTraffic, S.traffic);
   if (S.traffic >= 1) return fail(S, 'gridlock');
 
@@ -1241,7 +1322,7 @@ const PIPES = [
   { id: 'feed', kind: 'water', pts: [[606, 523], [606, 566], [238, 566], [238, 553]] },
   { id: 'pump', kind: 'water', pts: [[766, 462], [790, 462], [790, 563], [929, 563]] },
   { id: 'pier', kind: 'water', pts: [[929, 563], [1098, 563], [1098, 556]] },
-  { id: 'walk', kind: 'water', pts: [[1098, 563], [1126, 563], [1126, 84], [1454, 84], [1454, 563], [1482, 563], [1482, 556]] },
+  { id: 'walk', kind: 'water', pts: [[1098, 563], [1126, 563], [1126, 573], [1454, 573], [1454, 563], [1482, 563], [1482, 556]] },
 ];
 for (const p of PIPES) {
   p.seg = [];
@@ -1589,8 +1670,10 @@ function drawDriveCylinder(g) {
 // ---------- per-frame drawing ----------
 function drawWater(g) {
   g.fillStyle = '#cdceca'; g.fillRect(PIER_FACE, WATER_Y, FAR_PIER_FACE - PIER_FACE, H - WATER_Y);
+  // the river bed, with the hydraulic main to the north pier laid in a trench across it
+  g.fillStyle = '#a9a8a2'; g.fillRect(PIER_FACE, H - 16, FAR_PIER_FACE - PIER_FACE, 16);
   g.strokeStyle = '#6f6f6c'; g.lineCap = 'round';
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 7; i++) {
     const y0 = WATER_Y + 2 + i * 14;
     const dir = i % 2 ? 1.3 : -1.1;
     g.lineWidth = i === 0 ? 2 : 2.4;
@@ -1805,7 +1888,11 @@ function makePed(x) {
   return { kind, len: 14, speed: rand(18, 26), v: 20, x: x === undefined ? -18 : x, ph: rand(0, TAU), roll: 0, alpha: 1, fade: false, moving: true, parasol: Math.random() < 0.35 };
 }
 
-function roadClosed() { return bridgeAny(S) > 0 || S.leverUp || Math.max(V.bridgeShown, V.bridgeFarShown) > 0.002; }
+function roadClosed() { return S.gatesClosed || bridgeAny(S) > 0 || S.leverUp || Math.max(V.bridgeShown, V.bridgeFarShown) > 0.002; }
+// Once the gates shut with the bridge still down, anything already past them hurries on
+// across to the north road; the bridge counts as clear only once they're all off it.
+const onDeck = (v) => v.x + v.len > STOP_X + 0.5 && v.x < FAR_ROAD_X;
+const hurrySpeed = (v) => (v.len < 20 ? 60 : v.speed * 1.5);
 
 function updateLane(list, gap, dt, queueCap) {
   const closed = roadClosed();
@@ -1819,13 +1906,16 @@ function updateLane(list, gap, dt, queueCap) {
     const zone = list.filter((v) => v.x + v.len <= STOP_X + 0.5);
     if (target > 0 && zone.length > 0) held = new Set(zone.slice(Math.max(0, zone.length - target)));
   }
+  const clearing = closed && bridgeAny(S) <= 0 && !S.leverUp;
   let leaderRear = Infinity;
   for (const v of list) {
     const front = v.x + v.len;
     let limit = Infinity;
+    let top = v.speed;
     if (closed) {
       if (v.x >= FAR_ROAD_X) { /* already across, on the north road */ }
       else if (front <= STOP_X + 0.5) limit = STOP_X;
+      else if (clearing) top = hurrySpeed(v);
       else if (front <= HEEL_X + 0.5) limit = HEEL_X;
       else v.fade = true;
     } else if (held && held.has(v)) {
@@ -1833,8 +1923,8 @@ function updateLane(list, gap, dt, queueCap) {
     }
     if (leaderRear !== Infinity) limit = Math.min(limit, leaderRear - gap);
     const dist = limit - front;
-    const maxV = dist === Infinity ? v.speed : Math.sqrt(Math.max(0, 2 * 150 * dist));
-    const want = Math.min(v.speed, maxV);
+    const maxV = dist === Infinity ? top : Math.sqrt(Math.max(0, 2 * 150 * dist));
+    const want = Math.min(top, maxV);
     v.v = want > v.v ? Math.min(want, v.v + 80 * dt) : want;
     let nf = front + v.v * dt;
     if (nf > limit) { nf = Math.max(front, limit); v.v = 0; }
@@ -1857,12 +1947,18 @@ function entranceClear(list, gap) {
 function updateTraffic(dt) {
   updateLane(V.cars, 14, dt, CONFIG.trafficQueueCarsMax);
   updateLane(V.peds, 8, dt, CONFIG.trafficQueuePedsMax);
+  // The simulation's own clearing estimate is replaced by what's really on the bridge.
+  if (S.phase === 'playing' && S.gatesClosed && bridgeAny(S) <= 0) {
+    let t = 0;
+    for (const v of V.cars.concat(V.peds)) if (onDeck(v)) t = Math.max(t, (FAR_ROAD_X - v.x) / hurrySpeed(v) + 0.3);
+    S.deckClearIn = t;
+  }
   const closed = roadClosed();
   const busy = S.phase === 'playing' && S.traffic > 0.05;
   V.carT -= dt; V.pedT -= dt;
   if (V.carT <= 0) {
     let spawn = true, next;
-    if (!closed) next = busy ? rand(1.6, 2.4) : rand(3.4, 5.4);
+    if (!closed) next = busy ? rand(2.4, 3.4) : rand(4.8, 7.2);
     else {
       const queued = V.cars.filter((v) => v.x + v.len <= STOP_X + 1).length;
       spawn = queued < Math.round(S.traffic * CONFIG.trafficQueueCarsMax);
@@ -1872,7 +1968,7 @@ function updateTraffic(dt) {
   }
   if (V.pedT <= 0) {
     let spawn = true, next;
-    if (!closed) next = rand(4, 7.5);
+    if (!closed) next = rand(7, 11);
     else {
       const queued = V.peds.filter((v) => v.x + v.len <= STOP_X + 1).length;
       spawn = queued < Math.round(S.traffic * CONFIG.trafficQueuePedsMax);
@@ -1883,8 +1979,8 @@ function updateTraffic(dt) {
 }
 
 function populateRoad() {
-  [90, 470, 900, 1230].forEach((x) => V.cars.push(makeCar(x)));
-  [260, 700].forEach((x) => V.peds.push(makePed(x)));
+  [140, 620, 1230].forEach((x) => V.cars.push(makeCar(x)));
+  [420].forEach((x) => V.peds.push(makePed(x)));
 }
 
 function wheel(g, cx, cy, r, rot) {
@@ -2325,6 +2421,7 @@ const el = {
   track: $('track'), trackBoat: $('trackBoat'),
   cards: { start: $('cardStart'), win: $('cardWin'), lose: $('cardLose'), pause: $('cardPause') },
   coal: $('btnCoal'), oil: $('btnOil'), mute: $('btnMute'), pause: $('btnPause'),
+  gates: $('gates'), gateState: $('gateState'),
   lever: $('lever'), handle: $('handle'), lblLower: $('lblLower'), lblRaise: $('lblRaise'), curve: $('curve'),
   live: $('live'),
 };
@@ -2395,21 +2492,28 @@ function updateSigns() {
     (shNeedsLift && sh.state === 'approach' && !S.leverUp && S.accum < C.raiseMinCharge));
   setSign(sg.accum, needAccum, '', 'ACCUMULATORS NEED TO BE AT THE TOP TO LIFT THE BRIDGE', false, S.accumHint > 0);
 
-  setSign(sg.traffic, live && S.traffic > C.trafficWarn, 'TRAFFIC BUILDING UP', 'LOWER THE BRIDGE!', true, S.traffic > 0.85);
+  setSign(sg.traffic, live && S.traffic > C.trafficWarn, 'TRAFFIC BUILDING UP',
+    bridgeAny(S) > 0 || S.leverUp ? 'LOWER THE BRIDGE!' : 'OPEN THE ROAD!', true, S.traffic > 0.85);
 
   const moving = S.bridgeMoving;
   const lag = S.bridge - S.bridgeFar;
+  const shipComing = sh && shNeedsLift && (sh.state === 'approach' || sh.state === 'passing');
+  const blockText = { gates: ['STOP THE TRAFFIC FIRST', 'CLOSE THE ROAD, THEN RAISE'], deck: ['TRAFFIC STILL ON THE BRIDGE', 'WAIT FOR IT TO CLEAR'], bridgeUp: ['LOWER THE BRIDGE FIRST', 'THEN OPEN THE ROAD'] };
   if (live && S.enginesOut) setSign(sg.bridge, true, 'BRIDGE ENGINES STOPPED', S.enginesOut === 'steam' ? 'NO STEAM – STOKE THE BOILER!' : 'NO OIL – OIL THE MACHINERY!', true, true);
+  else if (live && S.blockHintT > 0 && blockText[S.blockHint]) setSign(sg.bridge, true, blockText[S.blockHint][0], blockText[S.blockHint][1], true, true);
   else if (live && Math.abs(lag) > 0.2) setSign(sg.bridge, true, 'LEAVES OUT OF STEP', `THE ${lag < 0 ? 'SOUTH' : 'NORTH'} LEAF IS LAGGING`, true, false);
   else if (live && moving > 0) setSign(sg.bridge, true, 'SAILING UP THE BRIDGE!', '', false, false);
   else if (live && moving < 0) setSign(sg.bridge, true, 'LOWERING THE BRIDGE', '', false, false);
+  else if (live && S.gatesClosed && bridgeAny(S) <= 0 && S.deckClearIn > 0) setSign(sg.bridge, true, 'CLEARING THE BRIDGE', 'WAIT FOR THE LAST TRAFFIC TO CROSS', false, false);
+  else if (live && S.gatesClosed && bridgeAny(S) <= 0 && shipComing) setSign(sg.bridge, true, 'ROAD CLOSED – BRIDGE CLEAR', 'READY TO RAISE', false, false);
+  else if (live && S.gatesClosed && bridgeAny(S) <= 0) setSign(sg.bridge, true, 'THE ROAD IS CLOSED', 'OPEN IT FOR THE TRAFFIC', false, false);
   else setSign(sg.bridge, false);
 
   if (live && sh && sh.state === 'approach') {
     const kindDef = SHIP_KINDS[sh.kind];
     const up = bridgeOpen(S) >= C.fullyUp;
     const title = kindDef.urgent ? 'FIRE TUG APPROACHING!' : kindDef.grand ? 'THE ROYAL BARGE APPROACHES' : 'BOAT APPROACHING';
-    const body = !shNeedsLift ? 'SHE RIDES LOW - NO NEED TO LIFT' : up ? 'THE WAY IS CLEAR!' : 'LIFT THE BRIDGE!';
+    const body = !shNeedsLift ? 'SHE RIDES LOW - NO NEED TO LIFT' : up ? 'THE WAY IS CLEAR!' : S.gatesClosed ? 'LIFT THE BRIDGE!' : 'STOP THE TRAFFIC!';
     setSign(sg.boat, true, title, body, kindDef.urgent, kindDef.urgent || (!up && shNeedsLift && sh.x - GEOM.shipDangerX < sh.speed * 5));
     const prog = clamp(1 - (sh.x - GEOM.shipDangerX) / sh.dist, 0, 1);
     el.trackBoat.style.left = `calc(26px + ${(1 - prog).toFixed(3)} * (100% - 40px))`;
@@ -2430,6 +2534,12 @@ function updateSigns() {
 
 function updateHud() {
   el.panel.classList.toggle('continuing', S.continuing);
+  el.gates.classList.toggle('closed', S.gatesClosed);
+  el.gates.setAttribute('aria-pressed', String(S.gatesClosed));
+  const gateText = S.gatesClosed ? (bridgeAny(S) <= 0 && S.deckClearIn > 0 ? 'CLEARING' : 'STOPPED') : 'OPEN';
+  if (el.gateState.textContent !== gateText) el.gateState.textContent = gateText;
+  const sh = S.ship;
+  el.gates.classList.toggle('nudge', S.phase === 'playing' && !S.gatesClosed && !!sh && SHIP_KINDS[sh.kind].needsLift && sh.state === 'approach');
   el.endlessTag.classList.toggle('show', S.continuing);
   // flip clock: counts down as usual, but once the player has chosen to carry on past
   // the first finish, there's no more end to count down to, so it counts elapsed time up.
@@ -2575,6 +2685,7 @@ function showLose() {
   const f = FAILS[S.failReason] || FAILS.collision;
   let sub = f.sub, tip = f.tip;
   if (S.failReason === 'collision' && S.failNote === 'accum') { sub = 'THE ACCUMULATORS HAD TOO LITTLE PRESSURE TO LIFT HER'; tip = 'Keep the boilers hot and the engines oiled so the weights are above the LIFT mark in time.'; }
+  if (S.failReason === 'collision' && S.failNote === 'gates') { sub = 'THE ROAD WAS STILL OPEN, SO THE BRIDGE COULD NOT BE RAISED'; tip = 'Close the road gates well before a ship is due: the bridge must clear of traffic before it can lift.'; }
   if (S.failReason === 'collision' && S.failNote === 'engines') { sub = 'THE BRIDGE ENGINES HAD STOPPED – NO STEAM OR NO OIL'; tip = 'Without steam and oil the bridge cannot move. Keep stoking the boiler and oiling the machinery.'; }
   if (S.failReason === 'collision' && S.failNote === 'lowered') { sub = 'THE BRIDGE CAME DOWN BEFORE SHE HAD PASSED'; tip = 'Wait for the "SHIP HAS PASSED" sign before lowering the bridge.'; }
   $('lTitle').textContent = f.title;
@@ -2679,7 +2790,15 @@ function onGameEvent(type, data) {
     case 'leverRefused':
       Sfx.refuse();
       el.lever.classList.remove('shake'); void el.lever.offsetWidth; el.lever.classList.add('shake');
-      say('Not enough pressure in the accumulators to lift the bridge.');
+      say(data === 'gates' ? 'Stop the traffic first: close the road gates.'
+        : data === 'deck' ? 'Wait: there is still traffic on the bridge.'
+        : 'Not enough pressure in the accumulators to lift the bridge.');
+      break;
+    case 'gates': Sfx.lever(data); Sfx.bell(); say(data ? 'Road gates closed.' : 'Road open.'); break;
+    case 'gatesRefused':
+      Sfx.refuse();
+      el.gates.classList.remove('shake'); void el.gates.offsetWidth; el.gates.classList.add('shake');
+      say('Lower the bridge before opening the road.');
       break;
     case 'repairHit': Sfx.clank(); break;
     case 'malfunctionStart':
@@ -2734,6 +2853,10 @@ function doLever(up) {
   Sfx.init();
   if (S.phase !== 'playing') { V.leverDrag = null; return; }
   actLever(S, up);
+}
+function doGates() {
+  Sfx.init();
+  actGates(S, !S.gatesClosed);
 }
 function doRepair() {
   Sfx.init();
@@ -2840,6 +2963,17 @@ bindPress(el.lblRaise, () => doLever(true));
 bindPress(el.mute, toggleMute);
 bindPress(el.pause, togglePause);
 bindPress(el.malSpot, doRepair);
+bindPress(el.gates, doGates);
+
+// Versions menu: the original build (published from the 'original' branch) and this one.
+const versions = $('versions'), versionsBtn = $('versionsBtn'), versionsMenu = $('versionsMenu');
+function setVersionsOpen(open) {
+  versionsMenu.hidden = !open;
+  versions.classList.toggle('open', open);
+  versionsBtn.setAttribute('aria-expanded', String(open));
+}
+versionsBtn.addEventListener('click', (e) => { e.stopPropagation(); setVersionsOpen(versionsMenu.hidden); });
+document.addEventListener('pointerdown', (e) => { if (!versions.contains(e.target)) setVersionsOpen(false); });
 $('btnStart').addEventListener('click', startGame);
 $('btnRestart').addEventListener('click', startGame);
 $('btnContinue').addEventListener('click', continueGame);
@@ -2902,6 +3036,7 @@ window.addEventListener('keydown', (e) => {
   switch (k.toLowerCase()) {
     case 'c': doCoal(); break;
     case 'o': doOil(); break;
+    case 't': doGates(); break;
     case 'm': toggleMute(); break;
     case 'p': case 'escape': togglePause(); break;
   }
