@@ -1923,12 +1923,19 @@ function drawBridge(g, frac) {
 }
 
 // ---------- road traffic ----------
-// Speeds share one real-world scale with the ships: the 61 m opening between the piers is
-// 320 px, and the game clock runs about 5x fast. That makes a walk (1.4 m/s) ~37 px/s, a
-// run (~4.3 m/s) ~115 px/s, a trotting cab (3.5 m/s) ~92 px/s, and a ship under the bridge
-// (~4.5 knots) CONFIG.passSpeed.
-const PED_WALK = [32, 42], PED_RUN = [108, 124];
-const VEH = { cab: { len: 78, speed: 92 }, cart: { len: 82, speed: 64 }, coach: { len: 88, speed: 84 }, bus: { len: 112, speed: 74 } };
+// Road time runs as fast as ship time. In its first year the bridge was raised 6,160
+// times, about once every 85 minutes; here a ship needing a lift comes every
+// ~shipIntervalMin..Max seconds, so the clock runs ROAD_TIME times too fast, and the
+// people and carriages move at their real speeds times that. Distances use the bridge
+// itself: the 61 m opening between the piers is 320 px.
+const REAL_LIFT_INTERVAL = 365 * 24 * 3600 / 6160;
+const ROAD_TIME = REAL_LIFT_INTERVAL / ((CONFIG.shipIntervalMin + CONFIG.shipIntervalMax) / 2);
+const PX_PER_M = (GEOM.farPierFace - 1130) / 61;
+const realSpeed = (mps) => mps * PX_PER_M * ROAD_TIME;              // m/s -> px per game second
+const ROAD_ACCEL = realSpeed(1) * ROAD_TIME, ROAD_BRAKE = 2 * ROAD_ACCEL;   // ~1 and 2 m/s², real
+const PED_WALK = [realSpeed(1.2), realSpeed(1.6)], PED_RUN = [realSpeed(4), realSpeed(4.8)];
+const VEH = { cab: { len: 78, speed: realSpeed(3.6) }, cart: { len: 82, speed: realSpeed(2.4) },
+  coach: { len: 88, speed: realSpeed(3.2) }, bus: { len: 112, speed: realSpeed(2.8) } };
 const VEH_KINDS = ['cab', 'cab', 'cart', 'coach', 'bus', 'cart', 'cab'];
 
 function makeCar(x) {
@@ -1938,7 +1945,7 @@ function makeCar(x) {
 }
 function makePed(x) {
   const kind = Math.random() < 0.5 ? 'man' : 'lady';
-  return { kind, len: 14, speed: rand(...PED_WALK), runSpeed: rand(...PED_RUN), running: false, v: 36, x: x === undefined ? -18 : x, ph: rand(0, TAU), roll: 0, alpha: 1, fade: false, moving: true, parasol: Math.random() < 0.35 };
+  return { kind, len: 14, speed: rand(...PED_WALK), runSpeed: rand(...PED_RUN), running: false, v: PED_WALK[0], x: x === undefined ? -18 : x, ph: rand(0, TAU), roll: 0, alpha: 1, fade: false, moving: true, parasol: Math.random() < 0.35 };
 }
 
 function roadClosed() { return S.gatesClosed || bridgeAny(S) > 0 || S.leverUp || Math.max(V.bridgeShown, V.bridgeFarShown) > 0.002; }
@@ -1977,15 +1984,16 @@ function updateLane(list, gap, dt, queueCap) {
     }
     if (leaderRear !== Infinity) limit = Math.min(limit, leaderRear - gap);
     const dist = limit - front;
-    const maxV = dist === Infinity ? top : Math.sqrt(Math.max(0, 2 * 150 * dist));
+    const maxV = dist === Infinity ? top : Math.sqrt(Math.max(0, 2 * ROAD_BRAKE * dist));
     const want = Math.min(top, maxV);
-    v.v = want > v.v ? Math.min(want, v.v + 80 * dt) : want;
+    v.v = want > v.v ? Math.min(want, v.v + ROAD_ACCEL * dt) : want;
     let nf = front + v.v * dt;
     if (nf > limit) { nf = Math.max(front, limit); v.v = 0; }
     v.x = nf - v.len;
     v.moving = v.v > 2;
-    v.ph += v.v * dt * (v.runSpeed ? (v.running ? 0.1 : 0.18) : 0.3);
-    v.roll += v.v * dt;
+    const pace = v.v / v.speed;
+    v.ph += dt * pace * (v.runSpeed ? 6.5 : 24);
+    v.roll += dt * pace * 80;
     if (nf > TIP_FADE) v.alpha = Math.min(v.alpha, 1 - (nf - TIP_FADE) / 70);
     if (v.fade) v.alpha -= dt * 2.5;
     leaderRear = v.x;
@@ -2012,17 +2020,17 @@ function updateTraffic(dt) {
   V.carT -= dt; V.pedT -= dt;
   if (V.carT <= 0) {
     let spawn = true, next;
-    if (!closed) next = busy ? rand(2.4, 3.4) : rand(4.8, 7.2);
+    if (!closed) next = busy ? rand(0.5, 0.8) : rand(0.9, 1.5);   // at road speed each is across in a second or two
     else {
       const queued = V.cars.filter((v) => v.x + v.len <= STOP_X + 1).length;
       spawn = queued < Math.round(S.traffic * CONFIG.trafficQueueCarsMax);
       next = 1.2;
     }
-    if (spawn && entranceClear(V.cars, 14)) { V.cars.push(makeCar()); V.carT = next; } else V.carT = 0.4;
+    if (spawn && entranceClear(V.cars, 14)) { V.cars.push(makeCar()); V.carT = next; } else V.carT = 0.05;
   }
   if (V.pedT <= 0) {
     let spawn = true, next;
-    if (!closed) next = rand(7, 11);
+    if (!closed) next = rand(0.9, 1.6);
     else {
       const queued = V.peds.filter((v) => v.x + v.len <= STOP_X + 1).length;
       spawn = queued < Math.round(S.traffic * CONFIG.trafficQueuePedsMax);
