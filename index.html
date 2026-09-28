@@ -2412,24 +2412,21 @@ function updateTraffic(dt) {
   const closed = roadClosed();
   const hour = hourOfDay(S.elapsed, ERA, S.dayStartHour);
   V.carT -= dt; V.pedT -= dt;
+  // Arrivals keep coming at the same real pace whether the road is open or closed — closed,
+  // they just pile up behind STOP_X instead of crossing, so a jam actually builds up in
+  // view as soon as the gates shut, rather than waiting on S.traffic (that meter still
+  // governs the *game's* traffic-jam ending and how fast a backlog releases once the road
+  // reopens; it's just no longer what throttles how many vehicles are visibly stopped).
   if (V.carT <= 0) {
-    let spawn = true, next;
-    if (!closed) next = rand(...roadPace(hour, [0.5, 0.8], VEH_RATE_MUL));   // at road speed each is across in a second or two
-    else {
-      const queued = V.cars.filter((v) => v.x + v.len <= STOP_X + 1).length;
-      spawn = queued < Math.round(S.traffic * CONFIG.trafficQueueCarsMax);
-      next = 1.2;
-    }
+    const next = rand(...roadPace(hour, [0.5, 0.8], VEH_RATE_MUL));
+    const queued = V.cars.filter((v) => v.x + v.len <= STOP_X + 1).length;
+    const spawn = !closed || queued < CONFIG.trafficQueueCarsMax;
     if (spawn && entranceClear(V.cars, 14)) { V.cars.push(makeCar()); V.carT = next; } else V.carT = 0.05;
   }
   if (V.pedT <= 0) {
-    let spawn = true, next;
-    if (!closed) next = rand(...roadPace(hour, [0.08, 0.2], PED_RATE_MUL));
-    else {
-      const queued = V.peds.filter((v) => v.x + v.len <= STOP_X + 1).length;
-      spawn = queued < Math.round(S.traffic * CONFIG.trafficQueuePedsMax);
-      next = 1.2;
-    }
+    const next = rand(...roadPace(hour, [0.08, 0.2], PED_RATE_MUL));
+    const queued = V.peds.filter((v) => v.x + v.len <= STOP_X + 1).length;
+    const spawn = !closed || queued < CONFIG.trafficQueuePedsMax;
     if (spawn && entranceClear(V.peds, 8)) { V.peds.push(makePed()); V.pedT = next; } else V.pedT = 0.1;
   }
 }
