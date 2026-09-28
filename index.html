@@ -2289,6 +2289,15 @@ function drawBridge(g, frac) {
 const REAL_LIFT_INTERVAL = 365 * 24 * 3600 / REAL_LIFTS_PER_YEAR[ERA];
 const ROAD_TIME = REAL_LIFT_INTERVAL / ((CONFIG.shipIntervalMin + CONFIG.shipIntervalMax) / 2);
 const GAME_SEC_PER_HOUR = 3600 / ROAD_TIME;
+// At modern's much bigger ROAD_TIME, real-world walking/driving speed (realSpeed above)
+// means each pedestrian or vehicle crosses the screen far faster, so it's in view for a
+// far shorter moment — by itself, that would make the road always look sparse in the
+// modern era no matter the spawn rate. This factor compensates for that (it's 1 for
+// Victorian, its own reference point, and scales up from there), so how crowded the road
+// looks reflects the real relative volumes below, not an artefact of the two eras'
+// different time compression.
+const ROAD_TIME_VICTORIAN_REF = (365 * 24 * 3600 / REAL_LIFTS_PER_YEAR.victorian) / ((CONFIG.shipIntervalMin + CONFIG.shipIntervalMax) / 2);
+const DWELL_COMP = ROAD_TIME / ROAD_TIME_VICTORIAN_REF;
 // Real daily totals (see the commit message for sources): Tower Bridge in its first year
 // (from July 1894) carried about 60,000 pedestrians and 8,000 horse-drawn vehicles a day;
 // today it carries about 40,000 people and 21,000 vehicles a day. The absolute spawn pace
@@ -2298,8 +2307,19 @@ const DAILY = MODERN ? { peds: 40000, vehicles: 21000 } : { peds: 60000, vehicle
 const PED_RATE_MUL = DAILY.peds / 60000, VEH_RATE_MUL = DAILY.vehicles / 8000;
 // Everything shares hourOfDay/rushMul with the ship schedule in CORE, so the ships and the
 // road speed up and quiet down together through the same rush hours and small hours.
+// A wider-range version of rushMul just for how the road looks: CORE's rushMul is kept
+// deliberately gentle so ship timing stays balanced (bot-tested), but that gentle floor
+// combined with the modern era's much higher real vehicle total (2.6x Victorian's) meant
+// modern's quietest hour was still nearly as dense as Victorian's rush hour — the road
+// never looked quiet. This only affects how many sprites are drawn, never S.traffic or
+// anything the game is won or lost on.
+function roadRushMul(hour) {
+  const bump = (h, c, w) => Math.exp(-((h - c) * (h - c)) / (2 * w * w));
+  const overnight = hour < 5 || hour > 23 ? 0.12 : hour < 7 ? 0.3 : 1;
+  return overnight * (0.35 + 0.5 * bump(hour, 8.5, 1.6) + 0.55 * bump(hour, 17.5, 1.8));
+}
 function roadPace(hour, [lo, hi], rateMul) {
-  const mul = clamp(rateMul * rushMul(hour), 0.03, 12);
+  const mul = clamp(rateMul * roadRushMul(hour) * DWELL_COMP, 0.02, 90);
   return [lo / mul, hi / mul];
 }
 const PX_PER_M = (GEOM.farPierFace - 1130) / 61;
