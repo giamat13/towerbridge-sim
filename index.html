@@ -482,7 +482,10 @@ body.modern #btnCoal .l { font-size: 70px; }
     <div class="card" id="cardPause" style="--rot:.4deg"><div class="paper">
       <h1>PAUSED</h1>
       <p class="lead">THE ENGINES ARE WAITING FOR YOU</p>
-      <button class="stamp dark" id="btnResume">RESUME</button>
+      <div class="card-buttons">
+        <button class="stamp dark" id="btnResume">RESUME</button>
+        <button class="stamp" id="btnResetPause">RESET</button>
+      </div>
     </div></div>
   </div>
 
@@ -3158,6 +3161,17 @@ function showCard(name) {
 
 function fmtTime(s) { s = Math.floor(s); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
 
+// Keeps the in-progress run in localStorage so a page refresh (or closing the tab) can
+// pick it back up instead of losing it, without affecting the separate high-score records.
+const SaveGame = (() => {
+  const KEY = MODERN ? 'bridgeMaster.save.modern' : 'bridgeMaster.save';
+  return {
+    write(state) { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* unavailable */ } },
+    read() { try { const j = localStorage.getItem(KEY); return j ? JSON.parse(j) : null; } catch (e) { return null; } },
+    clear() { try { localStorage.removeItem(KEY); } catch (e) { /* unavailable */ } },
+  };
+})();
+
 const Records = (() => {
   const KEY = MODERN ? 'bridgeMaster.records.modern' : 'bridgeMaster.records';
   const data = { bestTime: 0, bestStars: 0, bestShips: 0, bestContinueTime: 0, gamesPlayed: 0, wins: 0 };
@@ -3331,6 +3345,7 @@ function lockLandscape() {
 function startGame() {
   Sfx.init();
   goFullscreenLandscape();
+  SaveGame.clear();
   S = createState(ERA);
   S.phase = 'playing';
   P.length = 0;
@@ -3369,6 +3384,19 @@ function resumeGame() {
   showCard(null);
 }
 function togglePause() { if (S.phase === 'playing') pauseGame(); else if (S.phase === 'paused') resumeGame(); }
+// Abandons the run in progress (from the pause menu) and goes back to the start card,
+// without counting it as a loss.
+function resetGame() {
+  SaveGame.clear();
+  S = createState(ERA);
+  P.length = 0;
+  V.drops.length = 0;
+  V.stoke = 0; V.shake = 0; V.leafShake = 0; V.crashT = 0; V.sparkAt = -1;
+  V.lastSecond = -1;
+  el.body.classList.add('idle');
+  showCard('start');
+  say('Shift reset.');
+}
 
 function onGameEvent(type, data) {
   switch (type) {
@@ -3419,6 +3447,7 @@ function onGameEvent(type, data) {
     case 'shipArrived': break;
     case 'shipPassed': Sfx.toot(); say('The ship has passed. Lower the bridge.'); break;
     case 'fail':
+      SaveGame.clear();
       if (data === 'burst') {
         Sfx.boom(); V.shake = 16;
         for (let i = 0; i < 40; i++) steamPuff(DRUM.x + rand(-40, 40), DRUM.y + rand(-40, 30), rand(8, 16), rand(-90, -20));
@@ -3429,7 +3458,7 @@ function onGameEvent(type, data) {
         debris(x, ROAD_Y - 10, 30);
       } else if (data === 'gridlock') { Sfx.whistle(); V.shake = 3; }
       break;
-    case 'win': Sfx.fanfare(); setTimeout(showWin, 250); break;
+    case 'win': SaveGame.clear(); Sfx.fanfare(); setTimeout(showWin, 250); break;
   }
 }
 setEmitter(onGameEvent);
@@ -3587,6 +3616,7 @@ $('btnRestart').addEventListener('click', startGame);
 $('btnContinue').addEventListener('click', continueGame);
 $('btnRetry').addEventListener('click', startGame);
 $('btnResume').addEventListener('click', resumeGame);
+$('btnResetPause').addEventListener('click', resetGame);
 
 // Rotary lever: drag or swipe it round, or tap either side of the dial.
 let drag = null;
@@ -3666,6 +3696,10 @@ document.addEventListener('contextmenu', (e) => e.preventDefault());
 // LOOP
 // ============================================================
 function update(dt) {
+  if (S.phase === 'playing' || S.phase === 'paused') {
+    V.saveT = (V.saveT || 0) - dt;
+    if (V.saveT <= 0) { SaveGame.write(S); V.saveT = 1; }
+  }
   if (S.phase === 'paused') return;
   V.t += dt;
   const C = CONFIG;
@@ -3761,6 +3795,18 @@ function frame(now) {
 layout();
 populateRoad();
 updateBestLine();
+{
+  const saved = SaveGame.read();
+  if (saved && (saved.phase === 'playing' || saved.phase === 'paused')) {
+    S = Object.assign(createState(ERA), saved, { phase: 'paused' });
+    buildShipLog();
+    el.body.classList.remove('idle');
+    V.pressureShown = S.pressure; V.oilShown = S.oil; V.accShown = S.accum;
+    V.bridgeShown = S.bridge; V.bridgeFarShown = S.bridgeFar; V.heatShown = S.motorHeat;
+    showCard('pause');
+    say('Picked up where you left off. Resume when ready.');
+  }
+}
 requestAnimationFrame(frame);
 </script>
 </body>
