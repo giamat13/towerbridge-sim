@@ -666,7 +666,7 @@ const CONFIG = {
   trafficDrain: 0.06,         // per second while it is down
   trafficWarn: 0.7,
   trafficQueueCarsMax: 6,      // vehicles queued at 100% traffic
-  trafficQueuePedsMax: 3,      // pedestrians queued at 100% traffic
+  trafficQueuePedsMax: 10,     // pedestrians queued at 100% traffic
 
   // Malfunctions: an occasional stuck valve or pipe leak, cleared by clicking it
   // enough times before it starts costing pressure or accumulator charge.
@@ -2323,19 +2323,19 @@ function updateTraffic(dt) {
   }
   if (V.pedT <= 0) {
     let spawn = true, next;
-    if (!closed) next = rand(0.3, 0.6);
+    if (!closed) next = rand(0.08, 0.2);
     else {
       const queued = V.peds.filter((v) => v.x + v.len <= STOP_X + 1).length;
       spawn = queued < Math.round(S.traffic * CONFIG.trafficQueuePedsMax);
       next = 1.2;
     }
-    if (spawn && entranceClear(V.peds, 8)) { V.peds.push(makePed()); V.pedT = next; } else V.pedT = 0.5;
+    if (spawn && entranceClear(V.peds, 8)) { V.peds.push(makePed()); V.pedT = next; } else V.pedT = 0.1;
   }
 }
 
 function populateRoad() {
   [140, 620, 1230].forEach((x) => V.cars.push(makeCar(x)));
-  [180, 420, 610, 1300].forEach((x) => V.peds.push(makePed(x)));
+  [60, 180, 300, 420, 520, 610, 700, 1250, 1300, 1400].forEach((x) => V.peds.push(makePed(x)));
 }
 
 function wheel(g, cx, cy, r, rot) {
@@ -2507,10 +2507,11 @@ function drawRunner(g, v, x, gy, s) {
 }
 
 function drawTraffic(g) {
-  g.fillStyle = '#525250'; g.strokeStyle = '#525250';
-  for (const v of V.peds) { g.globalAlpha = clamp(v.alpha, 0, 1) * 0.9; drawPed(g, v); }
   g.fillStyle = '#383836'; g.strokeStyle = '#383836';
   for (const v of V.cars) { g.globalAlpha = clamp(v.alpha, 0, 1); drawCar(g, v); }
+  // pedestrians on the near pavement, in front of the carriageway
+  g.fillStyle = '#525250'; g.strokeStyle = '#525250';
+  for (const v of V.peds) { g.globalAlpha = clamp(v.alpha, 0, 1) * 0.9; drawPed(g, v); }
   g.globalAlpha = 1;
 }
 
