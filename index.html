@@ -522,8 +522,7 @@ body.modern #btnCoal .l { font-size: 70px; }
       <p class="lead">THE ENGINES ARE WAITING FOR YOU</p>
       <div class="card-buttons">
         <button class="stamp dark" id="btnResume">RESUME</button>
-        <button class="stamp" id="btnSaveGame">SAVE GAME</button>
-        <button class="stamp" id="btnResetPause">RESET</button>
+        <button class="stamp" id="btnMainMenu">MAIN MENU</button>
       </div>
     </div></div>
   </div>
@@ -3295,9 +3294,32 @@ const SavedGames = (() => {
       return id;
     },
     get(id, era) { return (readAll()[era] || []).find((slot) => slot.id === id) || null; },
+    // Updates a slot already known by id in place (moving it to the front as the newest);
+    // falls back to creating one if it's gone (e.g. the player deleted it from the menu).
+    update(id, era, state) {
+      const d = readAll();
+      const arr = d[era] || (d[era] = []);
+      const i = arr.findIndex((slot) => slot.id === id);
+      if (i < 0) return this.save(state, era);
+      const [slot] = arr.splice(i, 1);
+      slot.ts = Date.now(); slot.elapsed = state.elapsed; slot.shipsPassed = state.shipsPassed;
+      slot.continuing = state.continuing; slot.snapshot = state;
+      arr.unshift(slot);
+      writeAll(d);
+      return id;
+    },
     remove(id, era) { const d = readAll(); d[era] = (d[era] || []).filter((slot) => slot.id !== id); writeAll(d); },
   };
 })();
+// The one slot (if any) this run has saved into, so repeated autosaves update it in place
+// instead of piling up a new slot every time the player pauses.
+let autoSlotId = null;
+// Saves the current run into its slot automatically — on every pause, and once more just
+// before leaving for the main menu — so nothing needs a manual "save" button.
+function autoSaveSlot() {
+  if ((S.phase !== 'playing' && S.phase !== 'paused') || S.elapsed < 3) return;
+  autoSlotId = autoSlotId ? SavedGames.update(autoSlotId, ERA, S) : SavedGames.save(S, ERA);
+}
 
 const Records = (() => {
   const KEY = MODERN ? 'bridgeMaster.records.modern' : 'bridgeMaster.records';
@@ -3473,6 +3495,7 @@ function startGame() {
   Sfx.init();
   goFullscreenLandscape();
   SaveGame.clear();
+  autoSlotId = null;
   S = createState(ERA);
   S.phase = 'playing';
   P.length = 0;
@@ -3501,6 +3524,7 @@ function pauseGame() {
   if (S.phase !== 'playing') return;
   S.phase = 'paused';
   Sfx.setLoops(0, 0, 0);
+  autoSaveSlot();
   showCard('pause');
 }
 function resumeGame() {
@@ -3539,7 +3563,7 @@ function loadSavedGame(row) {
 function renderSaveSlots() {
   const rows = SavedGames.list();
   el.saveSlots.innerHTML = '';
-  if (!rows.length) { el.saveSlots.innerHTML = '<p class="empty">No saved games yet — save one from the pause menu.</p>'; return; }
+  if (!rows.length) { el.saveSlots.innerHTML = '<p class="empty">No saved games yet — pause a game, or return here from the pause menu, to save one.</p>'; return; }
   for (const row of rows) {
     const div = document.createElement('div'); div.className = 'save-row';
     const when = new Date(row.ts).toLocaleString();
@@ -3552,10 +3576,12 @@ function renderSaveSlots() {
     el.saveSlots.appendChild(div);
   }
 }
-// Abandons the run in progress (from the pause menu) and goes back to the start card,
-// without counting it as a loss.
-function resetGame() {
+// Leaves the run in progress (from the pause menu) for the main menu, without counting it
+// as a loss — its progress is saved automatically first, so it's waiting under SAVED GAMES.
+function goToMainMenu() {
+  autoSaveSlot();
   SaveGame.clear();
+  autoSlotId = null;
   S = createState(ERA);
   P.length = 0;
   V.drops.length = 0;
@@ -3563,7 +3589,7 @@ function resetGame() {
   V.lastSecond = -1;
   el.body.classList.add('idle');
   showCard('start');
-  say('Shift reset.');
+  say('Back to the main menu. Your game was saved.');
 }
 
 function onGameEvent(type, data) {
@@ -3784,13 +3810,7 @@ $('btnRestart').addEventListener('click', startGame);
 $('btnContinue').addEventListener('click', continueGame);
 $('btnRetry').addEventListener('click', startGame);
 $('btnResume').addEventListener('click', resumeGame);
-$('btnResetPause').addEventListener('click', resetGame);
-$('btnSaveGame').addEventListener('click', () => {
-  SavedGames.save(S, ERA);
-  say('Game saved.');
-  const btn = $('btnSaveGame'); const was = btn.textContent;
-  btn.textContent = 'SAVED!'; setTimeout(() => { btn.textContent = was; }, 1000);
-});
+$('btnMainMenu').addEventListener('click', goToMainMenu);
 $('btnShowSaves').addEventListener('click', () => { renderSaveSlots(); $('cardStart').classList.add('saves'); });
 $('btnSavesBack').addEventListener('click', () => { $('cardStart').classList.remove('saves'); });
 
