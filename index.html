@@ -180,6 +180,12 @@ button:focus-visible, #lever:focus-visible { outline: 3px solid var(--blue); out
 .stars { display: flex; justify-content: center; gap: 14px; margin-top: 14px; }
 .stars svg { width: 58px; height: 58px; fill: rgba(80,65,45,.18); stroke: rgba(80,65,45,.5); stroke-width: 1; transform: scale(.6); opacity: .5; transition: transform .35s cubic-bezier(.2,1.8,.4,1), opacity .3s; }
 .stars svg.on { fill: #c8962c; stroke: #6d5220; transform: scale(1); opacity: 1; }
+#cardWin .stats { display: none; }  /* the score breakdown replaces it */
+.score { margin-top: 10px; font: 400 14px/1.3 var(--serif); letter-spacing: 1px; color: #5d5246; text-align: center; }
+.score b { font: 400 44px/1 var(--stencil); color: #3a3026; letter-spacing: .5px; }
+.score .tip { margin-top: 6px; font-style: italic; font-size: 15px; color: #6d4a22; }
+.score .tip:empty { display: none; }
+.score .parts { display: flex; justify-content: center; gap: 18px; margin-top: 2px; }
 .stats { display: flex; justify-content: center; gap: 34px; margin-top: 14px; }
 .stats .stat-extra { display: none; }
 .stats .stat-extra.show { display: flex; }
@@ -324,9 +330,9 @@ kbd { position: absolute; right: 8px; bottom: 6px; font: 600 14px/1 var(--serif)
   position: absolute; left: 944px; top: 14px; width: 136px; height: 192px; border-radius: 14px;
   display: flex; flex-direction: column; align-items: center; color: #efefec; transition: transform .08s, filter .15s;
 }
-#gates .glbl { font-size: 30px; line-height: 1; font-weight: 400; margin-top: 4px; }
+#gates .glbl { font-size: 30px; line-height: 1; font-weight: 400; margin-top: 4px; margin-left: 44px; }
 #gates svg { width: 128px; height: 96px; margin-top: 4px; overflow: visible; }
-#gates #gateArm { transform-box: view-box; transform-origin: 24px 44px; transform: rotate(-72deg); transition: transform .45s cubic-bezier(.3,1.4,.5,1); }
+#gates #gateArm { transform-box: view-box; transform-origin: 24px 44px; transform: rotate(-88deg); transition: transform .45s cubic-bezier(.3,1.4,.5,1); }
 #gates.closed #gateArm { transform: rotate(0deg); }
 #gates #gateLamp { fill: #4a2a22; }
 #gates.closed #gateLamp { fill: #e0452f; filter: drop-shadow(0 0 5px #e0452f); }
@@ -430,6 +436,10 @@ kbd { position: absolute; right: 8px; bottom: 6px; font: 600 14px/1 var(--serif)
         <svg viewBox="0 0 24 24"><path d="M12 1.8l3.1 6.6 7.2.8-5.4 4.9 1.5 7.1L12 17.6l-6.4 3.6 1.5-7.1-5.4-4.9 7.2-.8z"/></svg>
         <svg viewBox="0 0 24 24"><path d="M12 1.8l3.1 6.6 7.2.8-5.4 4.9 1.5 7.1L12 17.6l-6.4 3.6 1.5-7.1-5.4-4.9 7.2-.8z"/></svg>
         <svg viewBox="0 0 24 24"><path d="M12 1.8l3.1 6.6 7.2.8-5.4 4.9 1.5 7.1L12 17.6l-6.4 3.6 1.5-7.1-5.4-4.9 7.2-.8z"/></svg>
+      </div>
+      <div class="score"><b id="wScore">0</b> / 100
+        <div class="parts"><span id="wSteam"></span><span id="wShipPts"></span><span id="wTrafficPts"></span><span id="wCare"></span></div>
+        <div class="tip" id="wTip"></div>
       </div>
       <div class="stats">
         <div><b id="wShips">0</b><span>SHIPS PASSED</span></div>
@@ -658,9 +668,15 @@ const CONFIG = {
   valveThrottle: 0.12,             // pump efficiency multiplier while a valve is stuck
   leakPressureDrop: 6,             // extra pressure/s lost while a pipe leaks
 
-  // Star rating: share of time in the ideal pressure range
-  starIdeal2: 0.55,
-  starIdeal3: 0.8,
+  // Star rating: a score out of 100 made of four parts (see scoreBreakdown)
+  scoreSteam: 30,             // share of the shift in the ideal pressure range
+  scoreShips: 25,             // how early the bridge was fully up for each ship
+  scoreTraffic: 25,           // the average traffic level, not just the worst moment
+  scoreCare: 20,              // oil kept up, engines never stopped, faults fixed promptly
+  shipMarginFull: 3,          // seconds fully up before arrival for full marks on an ordinary ship
+                              // (scaled by the kind's approachMul: a fire tug gives less warning)
+  star2: 60,
+  star3: 85,
 };
 
 // Ship positions (the x of the foremast, in scene pixels). The ship comes out from
@@ -786,7 +802,8 @@ function createState() {
     gatesClosed: false, deckClearIn: 0, blockHint: null, blockHintT: 0,
     ship: null, shipCount: 0, shipsPassed: 0, grandPassed: 0, urgentPassed: 0, passedAt: -99,
     shipSchedule: generateShipSchedule(), nextShipIdx: 0,
-    traffic: 0, peakTraffic: 0,
+    traffic: 0, peakTraffic: 0, trafficSum: 0,
+    careTime: 0, faultPenalties: 0, upSince: null, shipMargins: [],
     failReason: null, failTimer: 0, failNote: null,
   };
 }
@@ -874,12 +891,34 @@ function fail(S, reason, note) {
   emit('fail', reason);
 }
 
+// Each part scores 0..1, weighted into points out of 100.
+function scoreBreakdown(S) {
+  const C = CONFIG, T = Math.max(1, S.elapsed);
+  const ideal = S.idealTime / T;
+  // Grand ships count double: they're the ones the crowds come to see.
+  let shipPts = 0, shipWeight = 0;
+  for (const { kind, margin } of S.shipMargins) {
+    const w = SHIP_KINDS[kind].grand ? 2 : 1;
+    shipPts += w * clamp(0.4 + 0.6 * margin / (C.shipMarginFull * SHIP_KINDS[kind].approachMul), 0, 1);
+    shipWeight += w;
+  }
+  const ships = shipWeight ? shipPts / shipWeight : 1;
+  const meanTraffic = S.trafficSum / T;
+  const trafficScore = 0.7 * clamp(1 - meanTraffic / 0.35, 0, 1) + 0.3 * clamp(1 - Math.max(0, S.peakTraffic - 0.3) / (C.trafficWarn - 0.3), 0, 1);
+  const care = clamp((S.careTime / T - 0.6) / 0.35, 0, 1) * Math.max(0, 1 - 0.15 * S.faultPenalties);
+  const parts = {
+    steam: clamp((ideal - 0.3) / 0.6, 0, 1) * C.scoreSteam,
+    ships: ships * C.scoreShips,
+    traffic: trafficScore * C.scoreTraffic,
+    care: care * C.scoreCare,
+  };
+  for (const k in parts) parts[k] = Math.round(parts[k]);
+  parts.total = parts.steam + parts.ships + parts.traffic + parts.care;
+  return parts;
+}
 function starRating(S) {
-  const ideal = S.idealTime / Math.max(1, S.elapsed);
-  let stars = 1;
-  if (ideal >= CONFIG.starIdeal2) stars++;
-  if (ideal >= CONFIG.starIdeal3 && S.peakTraffic < CONFIG.trafficWarn) stars++;
-  return stars;
+  const total = scoreBreakdown(S).total;
+  return total >= CONFIG.star3 ? 3 : total >= CONFIG.star2 ? 2 : 1;
 }
 
 function stepGame(S, dt) {
@@ -918,6 +957,7 @@ function stepGame(S, dt) {
     if (m.type === 'leak') S.pressure = Math.max(0, S.pressure - C.leakPressureDrop * dt);
     if (m.age >= C.malfunctionGrace && m.age - m.lastPenalty >= C.malfunctionPenaltyInterval) {
       m.lastPenalty = m.age;
+      S.faultPenalties++;
       // A jammed engine is its own penalty: that leaf simply won't move until it's freed.
       if (m.type === 'valve') S.accum = Math.max(0, S.accum - 0.12);
       else if (m.type === 'leak') S.pressure = Math.max(0, S.pressure - 15);
@@ -935,6 +975,7 @@ function stepGame(S, dt) {
   if (fp > 0) S.oil = Math.max(0, S.oil - dt / S.oilTank * lerp(1, C.oilRamp, k) * (0.35 + 0.65 * fp));
   // Without steam or oil the engines stop, and with them the bridge — not the whole game.
   S.enginesOut = S.pressure < C.pressureDead ? 'steam' : S.oil <= 0 ? 'oil' : null;
+  if (!S.enginesOut && S.oil >= C.oilLow) S.careTime += dt;
   const targetRevs = C.engineRevs * fp * oilSpeedFactor(S.oil);
   S.engineSpeed = approach(S.engineSpeed, targetRevs, dt * (S.oil <= 0 ? 1.6 : 0.8));
   S.crank += S.engineSpeed * dt * TAU;
@@ -1004,6 +1045,7 @@ function stepGame(S, dt) {
         const note = S.enginesOut ? 'engines' : down && !S.gatesClosed ? 'gates' : down && S.accum < C.raiseMinCharge ? 'accum' : null;
         return fail(S, 'collision', note);
       }
+      if (SHIP_KINDS[sh.kind].needsLift) S.shipMargins.push({ kind: sh.kind, margin: S.upSince === null ? 0 : S.elapsed - S.upSince });
       sh.state = 'passing';
       emit('shipArrived');
     }
@@ -1029,6 +1071,8 @@ function stepGame(S, dt) {
   // 6. Road traffic builds up whenever the bridge is not down.
   S.traffic = clamp(S.traffic + (S.gatesClosed || bridgeAny(S) > 0 ? C.trafficFill : -C.trafficDrain) * dt, 0, 1);
   S.peakTraffic = Math.max(S.peakTraffic, S.traffic);
+  S.trafficSum += S.traffic * dt;
+  if (bridgeOpen(S) >= C.fullyUp) { if (S.upSince === null) S.upSince = S.elapsed; } else S.upSince = null;
   if (S.traffic >= 1) return fail(S, 'gridlock');
 
   // 7. Survived the shift? Once the player has chosen to carry on past the first finish,
@@ -2741,6 +2785,19 @@ function showLose() {
 
 function showWin() {
   const stars = starRating(S);
+  const pts = scoreBreakdown(S);
+  $('wScore').textContent = pts.total;
+  $('wSteam').textContent = `STEAM ${pts.steam}/${CONFIG.scoreSteam}`;
+  $('wShipPts').textContent = `SHIPS (${S.shipsPassed}) ${pts.ships}/${CONFIG.scoreShips}`;
+  $('wTrafficPts').textContent = `TRAFFIC ${pts.traffic}/${CONFIG.scoreTraffic}`;
+  $('wCare').textContent = `MACHINERY ${pts.care}/${CONFIG.scoreCare}`;
+  const lost = [
+    ['steam', CONFIG.scoreSteam, 'Keep the pressure needle in the green: little and often with the coal.'],
+    ['ships', CONFIG.scoreShips, 'Have the bridge fully up a few seconds before each ship arrives.'],
+    ['traffic', CONFIG.scoreTraffic, 'Get the road open again quickly once a ship is through.'],
+    ['care', CONFIG.scoreCare, 'Top up the oil before it runs low, and fix faults straight away.'],
+  ].map(([k, max, tip]) => ({ gap: max - pts[k], tip })).sort((a, b) => b.gap - a.gap)[0];
+  $('wTip').textContent = lost.gap >= 3 ? lost.tip : '';
   $('wShips').textContent = S.shipsPassed;
   $('wIdeal').textContent = `${Math.round(S.idealTime / Math.max(1, S.elapsed) * 100)}%`;
   $('wTraffic').textContent = `${Math.round(S.peakTraffic * 100)}%`;
@@ -2752,7 +2809,7 @@ function showWin() {
   badge.textContent = newStars ? 'NEW BEST STARS!' : newTime ? 'NEW BEST TIME!' : '';
   badge.classList.toggle('show', newStars || newTime);
   showCard('win');
-  say(`Well done! You kept the bridge running smoothly. ${stars} stars.`);
+  say(`Well done! You kept the bridge running smoothly. ${stars} stars, ${pts.total} points out of 100.`);
 }
 
 
