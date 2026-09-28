@@ -342,6 +342,16 @@ kbd { position: absolute; right: 8px; bottom: 6px; font: 600 14px/1 var(--serif)
 #gates.nudge .glbl { animation: nudgeTxt 1s ease-in-out infinite; }
 @keyframes nudgeTxt { 50% { color: #e8c874; } }
 .idle #gates { opacity: .45; }
+/* ---------- modern bridge ---------- */
+body.modern #btnCoal { cursor: pointer; }
+body.modern #btnCoal .s { font-size: 40px; }
+body.modern #btnCoal .l { font-size: 70px; }
+#btnCoal .pw { stroke: #8d8d89; transition: stroke .2s, filter .2s; }
+#btnCoal.on .pw { stroke: #7fdc8a; filter: drop-shadow(0 0 6px #7fdc8a); }
+#btnCoal.tripped .pw { stroke: #e0452f; }
+#btnCoal.on .hint { color: #7fdc8a; }
+#btnCoal.tripped .hint { color: #e8604d; }
+#btnCoal.shake .glyph { animation: shake .45s; }
 </style>
 </head>
 <body class="idle">
@@ -352,7 +362,8 @@ kbd { position: absolute; right: 8px; bottom: 6px; font: 600 14px/1 var(--serif)
       <button id="versionsBtn" aria-haspopup="true" aria-expanded="false" aria-controls="versionsMenu">VERSIONS &#9662;</button>
       <div id="versionsMenu" hidden>
         <a href="original.html">ORIGINAL VERSION<small>the first build of the game</small></a>
-        <span class="cur">NEW VERSION<small>what you're playing now</small></span>
+        <a href="index.html" data-era="victorian">VICTORIAN<small>steam, coal and accumulators</small></a>
+        <a href="index.html?era=modern" data-era="modern">MODERN<small>electric motors, oil hydraulics</small></a>
       </div>
     </div>
     <div id="endlessTag" aria-hidden="true">EXTRA TIME</div>
@@ -668,6 +679,21 @@ const CONFIG = {
   valveThrottle: 0.12,             // pump efficiency multiplier while a valve is stuck
   leakPressureDrop: 6,             // extra pressure/s lost while a pipe leaks
 
+  // The modern bridge (since the 1970s): electric motors drive oil-hydraulic pumps directly,
+  // so there are no boilers and no accumulators. The motors take a moment to run up, heat up
+  // while running (more while the leaves move) and trip if they overheat.
+  motorSpinUp: 2.5,           // seconds from off to full speed
+  motorSpinDown: 1.5,
+  motorReady: 0.9,            // share of full speed needed to start a lift
+  motorHeatStart: 0.2,
+  motorHeatIdle: 0.009,       // per second running
+  motorHeatWork: 0.04,        // extra per second while the leaves move
+  motorCool: 0.035,           // per second switched off
+  motorHotWarn: 0.75,
+  motorTripTime: 10,          // seconds a tripped motor must cool before it can be restarted
+  breakerSpeed: 0.35,         // motor speed while a circuit breaker has tripped
+  hydraulicLeakDrain: 0.03,   // oil lost per second from a hydraulic leak
+
   // Star rating: a score out of 100 made of four parts (see scoreBreakdown)
   scoreSteam: 30,             // share of the shift in the ideal pressure range
   scoreShips: 25,             // how early the bridge was fully up for each ship
@@ -789,10 +815,11 @@ function shipGap(kind, mul) {
   return rand(CONFIG.shipIntervalMin, CONFIG.shipIntervalMax) * mul * (SHIP_KINDS[kind].needsLift ? 1 : CONFIG.smallBoatGapMul);
 }
 
-function createState() {
+function createState(era = 'victorian') {
   return {
     phase: 'title',            // title | playing | paused | failing | over | won
-    elapsed: 0, continuing: false,
+    era, elapsed: 0, continuing: false,
+    motorsOn: false, motorSpin: 0, motorHeat: CONFIG.motorHeatStart, motorTripT: 0, motorTrips: 0,
     pressure: CONFIG.pressureStart, coalBurns: [], overTime: 0, idealTime: 0,
     oil: CONFIG.oilStart, oilTank: rand(CONFIG.oilTankMin, CONFIG.oilTankMax), enginesOut: null,
     engineSpeed: 0, crank: 0, pumpEff: 0,
@@ -853,6 +880,7 @@ function actLever(S, up) {
   if (up && bridgeAny(S) <= 0) {
     if (!S.gatesClosed) return refuse(S, 'gates', 'leverRefused');
     if (S.deckClearIn > 0) return refuse(S, 'deck', 'leverRefused');
+    if (S.era === 'modern' && S.motorSpin < CONFIG.motorReady) return refuse(S, 'motors', 'leverRefused');
     if (S.accum < CONFIG.raiseMinCharge) {
       S.accumHint = CONFIG.accumHintTime;
       emit('leverRefused', 'accum');
@@ -873,6 +901,16 @@ function actGates(S, close) {
   S.gatesClosed = close;
   S.deckClearIn = close ? CONFIG.deckClearTime : 0;
   emit('gates', close);
+  return 'ok';
+}
+
+// Modern bridge: switch the electric motors on or off.
+function actMotors(S, on) {
+  if (S.phase !== 'playing') return 'ignored';
+  if (on === S.motorsOn) return 'same';
+  if (on && S.motorTripT > 0) { emit('motorsRefused'); return 'refused'; }
+  S.motorsOn = on;
+  emit('motors', on);
   return 'ok';
 }
 
@@ -907,7 +945,7 @@ function scoreBreakdown(S) {
   const trafficScore = 0.7 * clamp(1 - meanTraffic / 0.35, 0, 1) + 0.3 * clamp(1 - Math.max(0, S.peakTraffic - 0.3) / (C.trafficWarn - 0.3), 0, 1);
   const care = clamp((S.careTime / T - 0.6) / 0.35, 0, 1) * Math.max(0, 1 - 0.15 * S.faultPenalties);
   const parts = {
-    steam: clamp((ideal - 0.3) / 0.6, 0, 1) * C.scoreSteam,
+    steam: clamp((ideal - 0.3) / 0.6, 0, 1) * (S.era === 'modern' ? Math.max(0, 1 - 0.3 * S.motorTrips) : 1) * C.scoreSteam,
     ships: ships * C.scoreShips,
     traffic: trafficScore * C.scoreTraffic,
     care: care * C.scoreCare,
@@ -926,7 +964,9 @@ function stepGame(S, dt) {
   S.elapsed += dt;
   const k = difficulty(S);
 
+  const modern = S.era === 'modern';
   // 1. Boiler: coal burns in over a second, pressure leaks away constantly.
+  if (!modern) {
   let heat = 0;
   for (let i = S.coalBurns.length - 1; i >= 0; i--) {
     const d = Math.min(dt, S.coalBurns[i]);
@@ -940,6 +980,7 @@ function stepGame(S, dt) {
   S.overTime = S.pressure > C.pressureBurst ? S.overTime + dt : 0;
   if (S.pressure >= C.idealMin && S.pressure <= C.idealMax) S.idealTime += dt;
   if (S.overTime > C.burstTime) return fail(S, 'burst');
+  }
 
   // 1.5 Occasional malfunctions: a stuck valve throttles the pumps, a leaking pipe
   // drains extra pressure, until enough clicks on the trouble spot clear it.
@@ -954,13 +995,16 @@ function stepGame(S, dt) {
   } else {
     const m = S.malfunction;
     m.age += dt;
-    if (m.type === 'leak') S.pressure = Math.max(0, S.pressure - C.leakPressureDrop * dt);
+    if (m.type === 'leak') {
+      if (modern) S.oil = Math.max(0, S.oil - C.hydraulicLeakDrain * dt);
+      else S.pressure = Math.max(0, S.pressure - C.leakPressureDrop * dt);
+    }
     if (m.age >= C.malfunctionGrace && m.age - m.lastPenalty >= C.malfunctionPenaltyInterval) {
       m.lastPenalty = m.age;
       S.faultPenalties++;
       // A jammed engine is its own penalty: that leaf simply won't move until it's freed.
-      if (m.type === 'valve') S.accum = Math.max(0, S.accum - 0.12);
-      else if (m.type === 'leak') S.pressure = Math.max(0, S.pressure - 15);
+      if (m.type === 'valve') { if (modern) S.motorHeat = Math.min(1, S.motorHeat + 0.1); else S.accum = Math.max(0, S.accum - 0.12); }
+      else if (m.type === 'leak') { if (modern) S.oil = Math.max(0, S.oil - 0.08); else S.pressure = Math.max(0, S.pressure - 15); }
       if (m.type !== 'engine') emit('malfunctionPenalty', m.type);
     }
     if (m.hits >= m.needed) {
@@ -970,7 +1014,10 @@ function stepGame(S, dt) {
     }
   }
 
-  // 2. Steam engine and its lubricator.
+  // 2–3. Steam engine and lubricator, then the pumps charging the accumulators — or, on
+  // the modern bridge, the electric motors driving the oil pumps.
+  if (modern) stepMotors(S, dt, k);
+  else {
   const fp = pressureFactor(S.pressure);
   if (fp > 0) S.oil = Math.max(0, S.oil - dt / S.oilTank * lerp(1, C.oilRamp, k) * (0.35 + 0.65 * fp));
   // Without steam or oil the engines stop, and with them the bridge — not the whole game.
@@ -984,6 +1031,7 @@ function stepGame(S, dt) {
   S.pumpEff = fp * oilPumpFactor(S.oil);
   if (S.malfunction && S.malfunction.type === 'valve') S.pumpEff *= C.valveThrottle;
   if (S.accum < 1) S.accum = Math.min(1, S.accum + C.pumpRate * S.pumpEff * dt);
+  }
 
   // 4. Bascule: one lever works both leaves, but each has its own engines. Each leaf
   // costs half of a full lift; the north engines run a little slower, and a jammed
@@ -991,7 +1039,10 @@ function stepGame(S, dt) {
   S.bridgeMoving = 0;
   S.stalled = false;
   const jam = S.malfunction && S.malfunction.type === 'engine' ? S.malfunction.side : null;
-  const power = S.enginesOut ? 0 : 1;
+  // The modern pumps drive the leaves directly: no stored charge, but no power either
+  // unless the motors are running.
+  if (modern) S.accum = 1;
+  const power = S.enginesOut ? 0 : modern ? clamp((S.motorSpin - 0.3) / 0.6, 0, 1) : 1;
   const rate = { bridge: jam === 'south' ? 0 : power, bridgeFar: jam === 'north' ? 0 : C.northEngineRate * power };
   if (S.leverUp) {
     const want = {};
@@ -1042,7 +1093,7 @@ function stepGame(S, dt) {
       if (SHIP_KINDS[sh.kind].needsLift && shipTouchesLeaf(sh.kind, S.bridge, S.bridgeFar)) {
         sh.state = 'crashed';
         const down = bridgeAny(S) <= 0.05;
-        const note = S.enginesOut ? 'engines' : down && !S.gatesClosed ? 'gates' : down && S.accum < C.raiseMinCharge ? 'accum' : null;
+        const note = S.enginesOut ? 'engines' : down && !S.gatesClosed ? 'gates' : modern && down && S.motorSpin < C.motorReady ? 'motors' : down && S.accum < C.raiseMinCharge ? 'accum' : null;
         return fail(S, 'collision', note);
       }
       if (SHIP_KINDS[sh.kind].needsLift) S.shipMargins.push({ kind: sh.kind, margin: S.upSince === null ? 0 : S.elapsed - S.upSince });
@@ -1082,6 +1133,32 @@ function stepGame(S, dt) {
     S.phase = 'won';
     emit('win');
   }
+}
+function stepMotors(S, dt, k) {
+  const C = CONFIG;
+  if (S.motorTripT > 0) S.motorTripT = Math.max(0, S.motorTripT - dt);
+  const breaker = S.malfunction && S.malfunction.type === 'valve';
+  const target = S.motorsOn && S.oil > 0 ? (breaker ? C.breakerSpeed : 1) : 0;
+  S.motorSpin = approach(S.motorSpin, target, dt / (target > S.motorSpin ? C.motorSpinUp : C.motorSpinDown));
+  const running = S.motorSpin > 0.05;
+  if (running) {
+    S.oil = Math.max(0, S.oil - dt / S.oilTank * lerp(1, C.oilRamp, k) * (0.35 + 0.65 * S.motorSpin));
+    S.motorHeat += (C.motorHeatIdle + (S.bridgeMoving ? C.motorHeatWork : 0)) * S.motorSpin * (S.oil < C.oilLow ? 1.6 : 1) * dt;
+  } else S.motorHeat -= C.motorCool * dt;
+  S.motorHeat = clamp(S.motorHeat, 0, 1);
+  if (S.motorHeat >= 1 && S.motorsOn) {
+    S.motorsOn = false;
+    S.motorTripT = C.motorTripTime;
+    S.motorTrips++;
+    emit('motorsTripped');
+  }
+  if (S.motorHeat < C.motorHotWarn) S.idealTime += dt;
+  S.enginesOut = S.motorTripT > 0 ? 'tripped' : S.oil <= 0 ? 'oil' : null;
+  if (!S.enginesOut && S.oil >= C.oilLow) S.careTime += dt;
+  S.engineSpeed = C.engineRevs * S.motorSpin * oilSpeedFactor(S.oil);
+  S.crank += S.engineSpeed * dt * TAU * 4;
+  S.pumpEff = S.motorSpin * oilPumpFactor(S.oil);
+  S.pressure = C.pressureStart;
 }
 // A few more ships to keep an extended shift going, at the hardest tuned pace.
 function extendShipSchedule(S) {
@@ -1339,6 +1416,11 @@ const Sfx = (() => {
 // ============================================================
 // VIEW – scene geometry, cached layers and per-frame drawing
 // ============================================================
+// Which bridge: the Victorian steam-hydraulic one (default) or the modern electric-hydraulic
+// one (?era=modern). Both run from this one file.
+const ERA = (() => { try { return new URLSearchParams(location.search).get('era') === 'modern' ? 'modern' : 'victorian'; } catch (e) { return 'victorian'; } })();
+const MODERN = ERA === 'modern';
+document.body.classList.toggle('modern', MODERN);
 const W = 1600, H = 580;
 const ROAD_Y = 392, WATER_Y = 470;
 const PIVOT_X = 1080, PIVOT_Y = 400, LEAF_LEN = GEOM.leafLen, LEAF_MAX = 78 * Math.PI / 180;
@@ -1351,10 +1433,11 @@ const MAL_SPOTS = {
   valve: { x: 693, y: 505 }, leak: { x: 400, y: 445 },
   engineSouth: { x: 1016, y: 482 }, engineNorth: { x: 2 * MIRROR_X - 1016, y: 482 },
 };
+if (MODERN) { MAL_SPOTS.valve = { x: 168, y: 500 }; MAL_SPOTS.leak = { x: 790, y: 520 }; }
 function mirror(g) { g.translate(2 * MIRROR_X, 0); g.scale(-1, 1); }
 const GAUGE = { x: 82, y: 478, r: 48 };
 const FLY = { x: 395, y: 505, r: 56, crank: 28, rod: 110 };
-const LUBE = { x: 598, y: 450, r: 18 };
+const LUBE = MODERN ? { x: 896, y: 280, r: 18 } : { x: 598, y: 450, r: 18 };   // modern: the oil reservoir's filler
 const DRUM = { x: 250, y: 512, r: 42 };
 const ACC_X = [863, 929];
 const PINION = { x: 1031, y: 458, r: 14 };
@@ -1389,10 +1472,10 @@ const bgLayer = document.createElement('canvas');
 const fgLayer = document.createElement('canvas');
 const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-let S = createState();
+let S = createState(ERA);
 const V = {
   s: 1, k: 0, t: 0,
-  pressureShown: 0, oilShown: CONFIG.oilStart, accShown: CONFIG.accumStart, bridgeShown: 0, bridgeFarShown: 0,
+  pressureShown: 0, heatShown: CONFIG.motorHeatStart, oilShown: CONFIG.oilStart, accShown: CONFIG.accumStart, bridgeShown: 0, bridgeFarShown: 0,
   coalHint: 0, oilHint: 0, lastCoalT: -99, lastOilT: -99, fire: 0.1, flow: { steam: 0, feed: 0, pump: 0, pier: 0, walk: 0 },
   stoke: 0, sparkAt: -1, drops: [],
   shake: 0, leafShake: 0, crashT: 0,
@@ -1514,6 +1597,14 @@ function drawSkyline(g) {
   g.fillRect(276, base - 106, 48, 36);
   g.beginPath(); g.ellipse(300, base - 106, 28, 32, 0, Math.PI, TAU); g.fill();
   g.fillRect(295, base - 152, 10, 18); g.fillRect(299, base - 163, 2, 12); g.fillRect(296, base - 159, 8, 2);
+  if (MODERN) {
+    // the Shard, the Gherkin and the Walkie-Talkie on today's skyline
+    g.fillStyle = '#dddcd7';
+    g.beginPath(); g.moveTo(534, base); g.lineTo(563, base - 296); g.lineTo(569, base - 290); g.lineTo(600, base); g.closePath(); g.fill();
+    g.beginPath(); g.moveTo(742, base); g.bezierCurveTo(730, base - 96, 744, base - 152, 760, base - 164); g.bezierCurveTo(776, base - 152, 790, base - 96, 778, base); g.closePath(); g.fill();
+    g.beginPath(); g.moveTo(842, base); g.lineTo(838, base - 118); g.quadraticCurveTo(860, base - 140, 886, base - 128); g.lineTo(878, base); g.closePath(); g.fill();
+    g.fillStyle = '#e1e0db';
+  }
   spire(g, 560, base, 158); spire(g, 176, base, 124);
   g.fillRect(616, base - 124, 9, 124); g.fillRect(612, base - 128, 17, 5);
   g.beginPath(); g.ellipse(620.5, base - 132, 5, 6, 0, 0, TAU); g.fill();
@@ -1597,7 +1688,14 @@ function findT(x) {
 function tri(g, x0, y0, x1, y1, x2, y2) { g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.lineTo(x2, y2); g.closePath(); g.fill(); }
 
 function drawStationTitles(g) {
-  const stations = [
+  const stations = MODERN ? [
+    ['1', 156, ['ELECTRIC SUPPLY']],
+    ['2', 452, ['ELECTRIC', 'MOTORS']],
+    ['3', 700, ['OIL HYDRAULIC', 'PUMPS']],
+    ['4', 896, ['OIL RESERVOIR']],
+    ['5', 1059, ['BASCULE DRIVE', 'SOUTH PIER']],
+    [null, 1528, ['BASCULE DRIVE', 'NORTH PIER']],
+  ] : [
     ['1', 156, ['BOILERS']],
     ['2', 452, ['STEAM PUMPING', 'ENGINES']],
     ['3', 700, ['HYDRAULIC', 'PUMPS']],
@@ -1650,6 +1748,7 @@ function lamp(g, x) {
 
 // ---------- cached foreground layer (static machinery drawn over the pipes) ----------
 function drawForeground(g) {
+  if (MODERN) { drawForegroundModern(g); return; }
   // Station 1: coal pile, barrow, boiler
   g.fillStyle = '#262626';
   g.beginPath(); g.moveTo(18, 569); g.lineTo(26, 552); g.lineTo(40, 544); g.lineTo(56, 538); g.lineTo(72, 543); g.lineTo(88, 552); g.lineTo(100, 569); g.closePath(); g.fill();
@@ -1706,6 +1805,34 @@ function drawForeground(g) {
     line(g, x - 6, y - 1, x + 6, y - 1); line(g, x, y - 7, x, y + 5);
   });
   // Station 5: the bascule drive engine cylinder in each pier
+  drawDriveCylinder(g);
+  g.save(); mirror(g); drawDriveCylinder(g); g.restore();
+}
+function drawForegroundModern(g) {
+  // Station 1: switchgear cabinets
+  for (const x of [146, 194, 242]) {
+    box(g, x, 441, 44, 128, '#d9d9d5', INK, 1.8);
+    g.strokeStyle = '#8a8a86'; g.lineWidth = 1; line(g, x + 22, 445, x + 22, 565);
+    box(g, x + 6, 452, 12, 8, '#f4f4f0', INK, 1); box(g, x + 26, 452, 12, 8, '#f4f4f0', INK, 1);
+    g.strokeStyle = '#8a8a86';
+    for (let y = 532; y < 562; y += 5) { line(g, x + 5, y, x + 18, y); line(g, x + 26, y, x + 39, y); }
+  }
+  g.fillStyle = INK; g.font = 'bold 8px ' + SERIF; g.textAlign = 'center';
+  g.fillText('11 kV', 168, 478); g.fillText('MAIN', 216, 478); g.fillText('415 V', 264, 478);
+  // Station 2: the motor's bedplate (the motor itself is drawn live, over this)
+  box(g, 372, 540, 206, 29, '#c1c1bd', INK, 1.4);
+  box(g, 584, 520, 44, 49, '#c9c9c5', INK, 1.2);
+  // Station 3: oil hydraulic pump
+  box(g, 623, 500, 10, 10, '#9d9d99', INK, 1.2);
+  box(g, 632, 488, 122, 38, '#cfcfcb', INK, 2);
+  box(g, 640, 495, 106, 24, '#f1c46a', '#8a5a10', 1.2);
+  box(g, 680, 474, 52, 14, '#d6d6d2', INK, 1.6);
+  roundTop(g, 736, 444, 30, 46, 15); g.fillStyle = '#dcdcd8'; g.fill(); g.strokeStyle = INK; g.lineWidth = 1.6; g.stroke();
+  box(g, 640, 526, 106, 43, '#c1c1bd', INK, 1.4);
+  [[863, 563], [929, 563], [1004, 563]].forEach(([x, y]) => {
+    g.strokeStyle = INK; g.lineWidth = 1.6; circle(g, x, y - 1, 6); g.fillStyle = '#e9e9e5'; g.fill(); g.stroke();
+    line(g, x - 6, y - 1, x + 6, y - 1); line(g, x, y - 7, x, y + 5);
+  });
   drawDriveCylinder(g);
   g.save(); mirror(g); drawDriveCylinder(g); g.restore();
 }
@@ -1928,15 +2055,18 @@ function drawBridge(g, frac) {
 // ~shipIntervalMin..Max seconds, so the clock runs ROAD_TIME times too fast, and the
 // people and carriages move at their real speeds times that. Distances use the bridge
 // itself: the 61 m opening between the piers is 320 px.
-const REAL_LIFT_INTERVAL = 365 * 24 * 3600 / 6160;
+const REAL_LIFT_INTERVAL = 365 * 24 * 3600 / (MODERN ? 850 : 6160);   // today: about 850 lifts a year
 const ROAD_TIME = REAL_LIFT_INTERVAL / ((CONFIG.shipIntervalMin + CONFIG.shipIntervalMax) / 2);
 const PX_PER_M = (GEOM.farPierFace - 1130) / 61;
 const realSpeed = (mps) => mps * PX_PER_M * ROAD_TIME;              // m/s -> px per game second
 const ROAD_ACCEL = realSpeed(1) * ROAD_TIME, ROAD_BRAKE = 2 * ROAD_ACCEL;   // ~1 and 2 m/s², real
 const PED_WALK = [realSpeed(1.2), realSpeed(1.6)], PED_RUN = [realSpeed(4), realSpeed(4.8)];
-const VEH = { cab: { len: 78, speed: realSpeed(3.6) }, cart: { len: 82, speed: realSpeed(2.4) },
-  coach: { len: 88, speed: realSpeed(3.2) }, bus: { len: 112, speed: realSpeed(2.8) } };
-const VEH_KINDS = ['cab', 'cab', 'cart', 'coach', 'bus', 'cart', 'cab'];
+const VEH = MODERN
+  ? { car: { len: 62, speed: realSpeed(8.9) }, cab: { len: 64, speed: realSpeed(8.9) },   // the 20 mph limit
+    van: { len: 72, speed: realSpeed(8) }, bus: { len: 116, speed: realSpeed(7.5) } }
+  : { cab: { len: 78, speed: realSpeed(3.6) }, cart: { len: 82, speed: realSpeed(2.4) },
+    coach: { len: 88, speed: realSpeed(3.2) }, bus: { len: 112, speed: realSpeed(2.8) } };
+const VEH_KINDS = MODERN ? ['car', 'car', 'cab', 'van', 'bus', 'car', 'cab'] : ['cab', 'cab', 'cart', 'coach', 'bus', 'cart', 'cab'];
 
 function makeCar(x) {
   const kind = VEH_KINDS[(Math.random() * VEH_KINDS.length) | 0];
@@ -1945,7 +2075,7 @@ function makeCar(x) {
 }
 function makePed(x) {
   const kind = Math.random() < 0.5 ? 'man' : 'lady';
-  return { kind, len: 14, speed: rand(...PED_WALK), runSpeed: rand(...PED_RUN), running: false, v: PED_WALK[0], x: x === undefined ? -18 : x, ph: rand(0, TAU), roll: 0, alpha: 1, fade: false, moving: true, parasol: Math.random() < 0.35 };
+  return { kind, len: 14, speed: rand(...PED_WALK), runSpeed: rand(...PED_RUN), running: false, v: PED_WALK[0], x: x === undefined ? -18 : x, ph: rand(0, TAU), roll: 0, alpha: 1, fade: false, moving: true, parasol: !MODERN && Math.random() < 0.35 };
 }
 
 function roadClosed() { return S.gatesClosed || bridgeAny(S) > 0 || S.leverUp || Math.max(V.bridgeShown, V.bridgeFarShown) > 0.002; }
@@ -2075,7 +2205,46 @@ function person(g, x, gy, hat) {
   if (hat) { g.fillRect(x - 2.4, gy - 20, 4.8, 6); g.fillRect(x - 4, gy - 15, 8, 1.6); }
 }
 
+function drawModernCar(g, v) {
+  const x = v.x, gy = ROAD_Y;
+  const wh = (cx, r) => {
+    circle(g, cx, gy - r, r); g.fill();
+    g.save(); g.fillStyle = '#9a9a96'; circle(g, cx, gy - r, r * 0.45); g.fill(); g.restore();
+  };
+  const glass = (fn) => { g.save(); g.fillStyle = 'rgba(255,255,255,0.35)'; fn(); g.restore(); };
+  switch (v.kind) {
+    case 'bus': { // red double-decker
+      g.save(); g.fillStyle = '#8e2b25'; rr(g, x, gy - 52, 116, 45, 5); g.fill(); g.restore();
+      glass(() => { for (let i = 0; i < 6; i++) { g.fillRect(x + 8 + i * 17, gy - 47, 13, 11); g.fillRect(x + 8 + i * 17, gy - 30, 13, 11); } });
+      wh(x + 20, 8); wh(x + 94, 8);
+      break;
+    }
+    case 'cab': { // black cab
+      g.beginPath(); g.moveTo(x, gy - 8); g.lineTo(x, gy - 20); g.lineTo(x + 12, gy - 22); g.quadraticCurveTo(x + 15, gy - 36, x + 26, gy - 36);
+      g.lineTo(x + 44, gy - 36); g.quadraticCurveTo(x + 52, gy - 35, x + 54, gy - 22); g.lineTo(x + 64, gy - 19); g.lineTo(x + 64, gy - 8); g.closePath(); g.fill();
+      glass(() => { g.fillRect(x + 18, gy - 32, 11, 9); g.fillRect(x + 32, gy - 32, 15, 9); });
+      g.save(); g.fillStyle = '#e8c874'; g.fillRect(x + 32, gy - 40, 10, 4); g.restore();
+      wh(x + 13, 7); wh(x + 51, 7);
+      break;
+    }
+    case 'van': {
+      rr(g, x, gy - 40, 52, 32, 3); g.fill();
+      rr(g, x + 49, gy - 30, 23, 22, 5); g.fill();
+      glass(() => g.fillRect(x + 56, gy - 27, 11, 8));
+      wh(x + 14, 7); wh(x + 58, 7);
+      break;
+    }
+    default: {
+      rr(g, x, gy - 21, 62, 13, 5); g.fill();
+      g.beginPath(); g.moveTo(x + 13, gy - 20); g.lineTo(x + 21, gy - 32); g.lineTo(x + 42, gy - 32); g.lineTo(x + 50, gy - 20); g.closePath(); g.fill();
+      glass(() => { g.fillRect(x + 22, gy - 29, 9, 8); g.fillRect(x + 33, gy - 29, 9, 8); });
+      wh(x + 13, 7); wh(x + 50, 7);
+    }
+  }
+}
+
 function drawCar(g, v) {
+  if (MODERN) { drawModernCar(g, v); return; }
   const x = v.x, gy = ROAD_Y;
   switch (v.kind) {
     case 'cab': {
@@ -2133,8 +2302,7 @@ function drawPed(g, v) {
     line(g, x + 6, gy - 11, x + 6 + s * 4, gy); line(g, x + 6, gy - 11, x + 6 - s * 4, gy);
     g.beginPath(); g.moveTo(x + 3, gy - 24); g.lineTo(x + 9, gy - 24); g.lineTo(x + 10.5, gy - 10); g.lineTo(x + 1.5, gy - 10); g.closePath(); g.fill();
     circle(g, x + 6, gy - 27, 3.1); g.fill();
-    g.fillRect(x + 3.6, gy - 35, 4.8, 6.5); g.fillRect(x + 2, gy - 30, 8, 1.6);
-    g.lineWidth = 1.1; line(g, x + 10, gy - 16, x + 12 + s, gy);
+    if (!MODERN) { g.fillRect(x + 3.6, gy - 35, 4.8, 6.5); g.fillRect(x + 2, gy - 30, 8, 1.6); g.lineWidth = 1.1; line(g, x + 10, gy - 16, x + 12 + s, gy); }
     g.lineCap = 'butt';
   } else {
     const b = v.moving ? Math.abs(s) * 0.8 : 0;
@@ -2142,7 +2310,7 @@ function drawPed(g, v) {
     g.beginPath(); g.ellipse(x + 3, gy - 12 - b, 3, 4.5, 0, 0, TAU); g.fill();
     g.fillRect(x + 5.5, gy - 25 - b, 4, 9);
     circle(g, x + 7.5, gy - 28 - b, 3); g.fill();
-    g.beginPath(); g.ellipse(x + 7.5, gy - 31 - b, 5, 1.6, 0, 0, TAU); g.fill();
+    if (!MODERN) { g.beginPath(); g.ellipse(x + 7.5, gy - 31 - b, 5, 1.6, 0, 0, TAU); g.fill(); }
     if (v.parasol) {
       g.lineWidth = 1; line(g, x + 10, gy - 20 - b, x + 11, gy - 36 - b);
       g.beginPath(); g.arc(x + 11, gy - 34 - b, 8, Math.PI, TAU); g.fill();
@@ -2160,7 +2328,7 @@ function drawRunner(g, v, x, gy, s) {
     g.beginPath(); g.moveTo(3, -24); g.lineTo(9, -24); g.lineTo(10.5, -10); g.lineTo(1.5, -10); g.closePath(); g.fill();
     g.lineWidth = 1.6; line(g, 6, -22, 6 - s * 6, -15); line(g, 6, -22, 6 + s * 6, -16);
     circle(g, 6, -27, 3.1); g.fill();
-    g.fillRect(3.6, -35, 4.8, 6.5); g.fillRect(2, -30, 8, 1.6);
+    if (!MODERN) { g.fillRect(3.6, -35, 4.8, 6.5); g.fillRect(2, -30, 8, 1.6); }
   } else {
     g.lineWidth = 1.8;
     line(g, 7, -8, 7 + s * 6, 0); line(g, 7, -8, 7 - s * 6, 0);   // skirts gathered up, feet showing
@@ -2168,7 +2336,7 @@ function drawRunner(g, v, x, gy, s) {
     g.fillRect(5.5, -25, 4, 9);
     g.lineWidth = 1.4; line(g, 8, -22, 12, -14);
     circle(g, 7.5, -28, 3); g.fill();
-    g.beginPath(); g.ellipse(7.5, -31, 5, 1.6, 0, 0, TAU); g.fill();
+    if (!MODERN) { g.beginPath(); g.ellipse(7.5, -31, 5, 1.6, 0, 0, TAU); g.fill(); }
     if (v.parasol) { g.lineWidth = 1; line(g, 5, -22, 0, -12); }   // parasol furled and tucked under the arm
   }
   g.restore();
@@ -2239,11 +2407,19 @@ function drawPipes(g) {
   const flows = V.flow;
   for (const p of PIPES) {
     const water = p.kind === 'water';
+    if (MODERN && p.id === 'feed') continue;   // no boiler to feed
     g.lineJoin = 'miter'; g.lineCap = 'butt';
     g.beginPath(); p.pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
-    g.strokeStyle = water ? '#3c6f83' : '#5a5a58'; g.lineWidth = 11; g.stroke();
-    g.strokeStyle = water ? '#a4d9ec' : '#f1f1ee'; g.lineWidth = 6.5; g.stroke();
-    g.fillStyle = water ? '#274f5e' : '#4e4e4c';
+    if (MODERN && !water) {
+      // the supply cable from the switchgear to the motor
+      g.strokeStyle = '#2a2a28'; g.lineWidth = 7; g.stroke();
+      g.strokeStyle = '#e8c874'; g.lineWidth = 2; g.setLineDash([6, 10]); g.lineDashOffset = -flows[p.id]; g.stroke();
+      g.setLineDash([]); g.lineDashOffset = 0;
+      continue;
+    }
+    g.strokeStyle = water ? (MODERN ? '#8a5a10' : '#3c6f83') : '#5a5a58'; g.lineWidth = 11; g.stroke();
+    g.strokeStyle = water ? (MODERN ? '#f1c46a' : '#a4d9ec') : '#f1f1ee'; g.lineWidth = 6.5; g.stroke();
+    g.fillStyle = water ? (MODERN ? '#6d450b' : '#274f5e') : '#4e4e4c';
     const spacing = 30;
     let d = ((flows[p.id] % spacing) + spacing) % spacing;
     let si = 0, acc = 0;
@@ -2377,6 +2553,103 @@ function drawLubricator(g) {
   }
 }
 
+function drawTempGauge(g) {
+  const C = CONFIG, cx = GAUGE.x, cy = GAUGE.y, r = GAUGE.r;
+  const A0 = 135 * DEG, SW = 270 * DEG, ang = (t) => A0 + clamp(t, 0, 122) / 120 * SW;
+  const temp = (h) => 20 + 100 * h;
+  circle(g, cx, cy, r + 6); g.fillStyle = '#d8d8d4'; g.fill(); g.strokeStyle = INK; g.lineWidth = 2.4; g.stroke();
+  circle(g, cx, cy, r); g.fillStyle = '#fcfcfa'; g.fill(); g.lineWidth = 1.4; g.stroke();
+  g.lineWidth = 6;
+  g.strokeStyle = '#9fd6a0'; g.beginPath(); g.arc(cx, cy, r - 6, ang(20), ang(temp(C.motorHotWarn))); g.stroke();
+  g.strokeStyle = '#c0392b'; g.beginPath(); g.arc(cx, cy, r - 6, ang(temp(0.9)), ang(120)); g.stroke();
+  g.strokeStyle = INK;
+  for (let v = 0; v <= 120; v += 5) {
+    const a = ang(v), major = v % 20 === 0;
+    g.lineWidth = major ? 1.8 : 1;
+    line(g, cx + Math.cos(a) * (r - 2), cy + Math.sin(a) * (r - 2), cx + Math.cos(a) * (r - (major ? 10 : 6)), cy + Math.sin(a) * (r - (major ? 10 : 6)));
+  }
+  g.fillStyle = INK; g.font = '9.5px ' + SERIF; g.textAlign = 'center'; g.textBaseline = 'middle';
+  for (let v = 40; v <= 80; v += 40) { const a = ang(v); g.fillText(String(v), cx + Math.cos(a) * (r - 18), cy + Math.sin(a) * (r - 18)); }
+  g.fillText('°C', cx, cy + 22);
+  g.textBaseline = 'alphabetic';
+  const a = ang(temp(V.heatShown));
+  g.strokeStyle = '#1b1b1b'; g.lineWidth = 2.6; g.lineCap = 'round';
+  line(g, cx - Math.cos(a) * 8, cy - Math.sin(a) * 8, cx + Math.cos(a) * (r - 9), cy + Math.sin(a) * (r - 9));
+  g.lineCap = 'butt';
+  circle(g, cx, cy, 4.5); g.fillStyle = '#1b1b1b'; g.fill();
+}
+function lampAt(g, x, y, on, color) {
+  if (on) {
+    const glow = g.createRadialGradient(x, y, 1, x, y, 12);
+    glow.addColorStop(0, color); glow.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = glow; circle(g, x, y, 12); g.fill();
+  }
+  circle(g, x, y, 4.2); g.fillStyle = on ? color : '#8a8a86'; g.fill(); g.strokeStyle = INK; g.lineWidth = 1.2; g.stroke();
+}
+function drawSwitchgear(g) {
+  const tripped = S.motorTripT > 0;
+  lampAt(g, 206, 492, S.motorSpin >= CONFIG.motorReady && !tripped, '#5fd46a');
+  lampAt(g, 226, 492, S.motorsOn && S.motorSpin < CONFIG.motorReady, '#f2b43c');
+  lampAt(g, 216, 544, tripped && (V.t * 3) % 1 < 0.6, '#e0452f');
+  // the main switch: a rotary handle, upright when on
+  const a = (S.motorsOn ? -90 : 0) * DEG;
+  circle(g, 216, 516, 10); g.fillStyle = '#efefeb'; g.fill(); g.strokeStyle = INK; g.lineWidth = 1.6; g.stroke();
+  g.save(); g.translate(216, 516); g.rotate(a);
+  g.fillStyle = tripped ? '#b3261e' : '#2a2a28'; rr(g, -3, -3.5, 17, 7, 3); g.fill();
+  g.restore();
+}
+function drawMotor(g) {
+  const heat = V.heatShown;
+  // shaft and coupling to the pump
+  g.strokeStyle = '#555553'; g.lineWidth = 6; line(g, 560, 508, 634, 508);
+  box(g, 590, 492, 18, 32, '#bdbdb9', INK, 1.4);
+  const my = 508 + Math.sin(S.crank) * 13;
+  g.fillStyle = INK; g.fillRect(590, my - 1.5, 18, 3);
+  // housing, glowing as it heats, with cooling fins
+  rr(g, 380, 474, 180, 68, 10); g.fillStyle = '#cfcfcb'; g.fill();
+  if (heat > 0.4) { g.fillStyle = `rgba(214,60,30,${((heat - 0.4) * 0.75).toFixed(3)})`; g.fill(); }
+  g.strokeStyle = INK; g.lineWidth = 2; g.stroke();
+  g.strokeStyle = 'rgba(40,40,38,0.35)'; g.lineWidth = 1.4;
+  for (let x = 396; x < 552; x += 10) line(g, x, 479, x, 537);
+  // fan cowl, its grille flickering as the fan turns
+  box(g, 352, 480, 30, 56, '#bdbdb9', INK, 1.6);
+  const sp = S.motorSpin;
+  g.strokeStyle = '#3f3f3d'; g.lineWidth = 1.2;
+  for (let i = 0; i < 6; i++) {
+    const y = 484 + ((i * 8 + S.crank * 6) % 48 + 48) % 48;
+    g.globalAlpha = 0.25 + 0.5 * sp; line(g, 355, y, 379, y);
+  }
+  g.globalAlpha = 1;
+  // terminal box, where the supply cable comes in
+  box(g, 540, 462, 34, 14, '#d6d6d2', INK, 1.4);
+  lampAt(g, 530, 469, sp >= CONFIG.motorReady, '#5fd46a');
+}
+function drawReservoir(g) {
+  roundTop(g, 818, 272, 156, 302, 14);
+  g.fillStyle = '#f6f6f3'; g.fill(); g.strokeStyle = '#6c6c69'; g.lineWidth = 2; g.stroke();
+  const tx = 846, tw = 100, ty = 296, tb = 556;
+  box(g, tx, ty, tw, tb - ty, '#fbfbf9', '#5a5a58', 2);
+  const lvl = clamp(V.oilShown, 0, 1), top = tb - (tb - ty - 4) * lvl;
+  if (lvl > 0.003) {
+    const gr = g.createLinearGradient(0, top, 0, tb);
+    gr.addColorStop(0, '#f7c243'); gr.addColorStop(1, '#b86b09');
+    g.fillStyle = gr; g.fillRect(tx + 3, top, tw - 6, tb - top - 2);
+    g.strokeStyle = '#8a4e05'; g.lineWidth = 1.2; line(g, tx + 3, top, tx + tw - 3, top);
+  }
+  const lowY = tb - (tb - ty - 4) * CONFIG.oilLow;
+  [[lowY, 'LOW'], [ty + 4, 'FULL']].forEach(([y, label], i) => {
+    g.strokeStyle = i === 0 ? '#a0782c' : '#8f8e8a'; g.lineWidth = 1.4; g.setLineDash([4, 3]); line(g, 834, y, 958, y); g.setLineDash([]);
+    g.fillStyle = g.strokeStyle; tri(g, 974, y - 5, 974, y + 5, 966, y);
+    g.font = (i === 0 ? 'bold ' : '') + '11px ' + SERIF; g.textBaseline = 'middle';
+    if (i === 0) { g.textAlign = 'right'; g.fillText(label, tx + tw - 6, y - 8); } else { g.textAlign = 'left'; g.fillText(label, 978, y); }
+  });
+  g.textBaseline = 'alphabetic';
+  // filler funnel
+  g.fillStyle = '#c9a256'; g.strokeStyle = '#5a4418'; g.lineWidth = 1.4;
+  g.beginPath(); g.moveTo(880, 262); g.lineTo(912, 262); g.lineTo(900, 282); g.lineTo(892, 282); g.closePath(); g.fill(); g.stroke();
+  box(g, 892, 282, 8, 14, '#b08739', '#5a4418', 1);
+}
+
 function warnTriangle(g, x, y) {
   if ((V.t * 3) % 1 > 0.62) return;
   g.beginPath(); g.moveTo(x, y - 13); g.lineTo(x + 13, y + 10); g.lineTo(x - 13, y + 10); g.closePath();
@@ -2477,18 +2750,20 @@ function render() {
   if (S.ship && shipView(S.ship).front) drawShip(g, S.ship);
   drawTraffic(g);
   drawStop(g);
-  drawAccumulators(g);
+  if (MODERN) drawReservoir(g); else drawAccumulators(g);
   drawPipes(g);
   g.drawImage(fgLayer, 0, 0, W, H);
-  drawFire(g);
-  drawGauge(g);
-  drawStoker(g);
-  drawEngine(g);
-  drawLubricator(g);
+  if (MODERN) { drawTempGauge(g); drawSwitchgear(g); drawMotor(g); }
+  else { drawFire(g); drawGauge(g); drawStoker(g); drawEngine(g); drawLubricator(g); }
   drawDrops(g);
   if (S.phase === 'playing' || S.phase === 'failing') {
-    if (S.pressure < CONFIG.pressureCool || S.pressure > CONFIG.pressureHigh) warnTriangle(g, 150, 436);
-    if (S.oil <= 0) warnTriangle(g, 520, 446);
+    if (MODERN) {
+      if (S.motorHeat > CONFIG.motorHotWarn || S.motorTripT > 0) warnTriangle(g, 150, 436);
+      if (S.oil <= 0) warnTriangle(g, 950, 318);
+    } else {
+      if (S.pressure < CONFIG.pressureCool || S.pressure > CONFIG.pressureHigh) warnTriangle(g, 150, 436);
+      if (S.oil <= 0) warnTriangle(g, 520, 446);
+    }
   }
   drawParticles(g);
 }
@@ -2513,6 +2788,34 @@ const el = {
   lever: $('lever'), handle: $('handle'), lblLower: $('lblLower'), lblRaise: $('lblRaise'), curve: $('curve'),
   live: $('live'),
 };
+
+if (MODERN) {
+  el.coal.innerHTML = `<span class="ic">
+      <svg class="arrow" viewBox="0 0 78 62" aria-hidden="true"><polygon points="39,0 78,34 56,34 56,62 22,62 22,34 0,34"/></svg>
+      <svg class="glyph" viewBox="0 0 176 124" aria-hidden="true">
+        <rect x="46" y="18" width="84" height="100" rx="12" fill="#3a3a3b" stroke="#111" stroke-width="2"/>
+        <path class="pw" d="M70 50a26 26 0 1 0 36 0M88 36v30" fill="none" stroke-width="7" stroke-linecap="round"/>
+      </svg>
+    </span>
+    <span class="txt"><span class="s">ELECTRIC</span><span class="l">MOTORS</span><span class="hint" id="motorState">OFF – CLICK TO START</span></span>
+    <kbd>C</kbd>`;
+  el.coal.setAttribute('aria-label', 'Start or stop the electric motors (key C)');
+  el.motorState = $('motorState');
+  el.oil.querySelector('.txt').innerHTML = '<span class="l">OIL</span><span class="s">HYDRAULICS</span><span class="hint">DRAG UP TO THE RESERVOIR</span>';
+  el.oil.setAttribute('aria-label', 'Top up the hydraulic oil (key O)');
+  cv.setAttribute('aria-label', "Cutaway of Tower Bridge's modern electric-hydraulic machinery");
+  const how = document.querySelectorAll('#cardStart .how li span');
+  how[0].textContent = 'Start the electric motors before each lift – they take a few seconds to run up.';
+  how[1].textContent = 'Switch them off between ships: they heat up while running and trip if they overheat.';
+  how[2].textContent = 'Drag oil up to the reservoir to keep the hydraulics topped up.';
+  document.querySelector('#cardStart .lead').innerHTML = 'THE MODERN BRIDGE: KEEP ITS ELECTRIC-HYDRAULIC<br>MACHINERY RUNNING FOR <span class="hl">2 MINUTES</span>';
+  document.querySelector('#cardStart .keys').textContent = 'Keys: C motors · O oil · T road gates · ↑ ↓ bridge · Space start · P pause · M sound';
+  document.querySelector('#cardWin .big2').textContent = 'GREAT WORK!';
+}
+{
+  const cur = $('versionsMenu').querySelector(`[data-era="${ERA}"]`);
+  cur.classList.add('cur'); cur.setAttribute('aria-current', 'page');
+}
 
 function tornEdges(node, amp, step) {
   const j = () => (Math.random() * amp).toFixed(1);
@@ -2544,24 +2847,36 @@ function setSign(node, on, title, body, red, urgent) {
   node.classList.add('show');
 }
 
+function motorSign(node, live) {
+  const C = CONFIG, sh = S.ship;
+  const shipDue = sh && SHIP_KINDS[sh.kind].needsLift && sh.state === 'approach';
+  if (live && S.motorTripT > 0) setSign(node, true, 'MOTORS TRIPPED!', `OVERHEATED – COOLING DOWN (${Math.ceil(S.motorTripT)}s)`, true, true);
+  else if (live && S.motorsOn && S.motorHeat > C.motorHotWarn) setSign(node, true, 'MOTORS RUNNING HOT', 'SWITCH THEM OFF WHEN NOT NEEDED', true, S.motorHeat > 0.9);
+  else if (live && shipDue && !S.motorsOn) setSign(node, true, 'START THE MOTORS', 'THEY TAKE A FEW SECONDS TO RUN UP', false, false);
+  else if (live && S.motorsOn && S.motorSpin < C.motorReady) setSign(node, true, 'MOTORS RUNNING UP', '', false, false);
+  else setSign(node, false);
+}
+
 function updateSigns() {
   const C = CONFIG, sg = el.signs;
   const live = S.phase === 'playing';
   const p = S.pressure;
-  if (live && V.coalHint > 0) setSign(sg.boiler, true, 'DRAG THE COAL!', 'SWIPE THE SHOVEL UP INTO THE BOILER', false, false);
+  if (MODERN) motorSign(sg.boiler, live);
+  else if (live && V.coalHint > 0) setSign(sg.boiler, true, 'DRAG THE COAL!', 'SWIPE THE SHOVEL UP INTO THE BOILER', false, false);
   else if (live && p > C.pressureHigh) setSign(sg.boiler, true, 'PRESSURE TOO HIGH', 'STOP STOKING!', true, p > C.pressureBurst);
   else if (live && p < C.pressureDead) setSign(sg.boiler, true, 'THE FIRES ARE OUT', 'NO STEAM FOR THE BRIDGE – STOKE THE BOILER!', true, true);
   else if (live && p < C.pressureCool) setSign(sg.boiler, true, 'BOILERS ARE COOLING', "KEEP STOKING OR YOU'LL RUN OUT OF STEAM!", false, false);
   else setSign(sg.boiler, false);
 
-  if (live && V.oilHint > 0) setSign(sg.oil, true, 'DRAG THE OIL!', 'SWIPE THE OILER UP TO THE LUBRICATOR', false, false);
-  else if (live && S.oil <= 0) setSign(sg.oil, true, 'OUT OF OIL!', 'THE ENGINES HAVE STOPPED – OIL THE MACHINERY!', true, true);
-  else if (live && S.oil < C.oilLow) setSign(sg.oil, true, 'OIL RUNNING LOW', 'ENGINES SLOWING', true, false);
+  if (live && V.oilHint > 0) setSign(sg.oil, true, 'DRAG THE OIL!', MODERN ? 'SWIPE THE OIL UP TO THE RESERVOIR' : 'SWIPE THE OILER UP TO THE LUBRICATOR', false, false);
+  else if (live && S.oil <= 0) setSign(sg.oil, true, 'OUT OF OIL!', MODERN ? 'THE HYDRAULICS HAVE STOPPED – TOP UP THE OIL!' : 'THE ENGINES HAVE STOPPED – OIL THE MACHINERY!', true, true);
+  else if (live && S.oil < C.oilLow) setSign(sg.oil, true, MODERN ? 'HYDRAULIC OIL LOW' : 'OIL RUNNING LOW', MODERN ? 'MOTORS RUNNING HOTTER' : 'ENGINES SLOWING', true, false);
   else setSign(sg.oil, false);
 
   const m = S.malfunction;
   if (live && m) {
-    const label = m.type === 'valve' ? ['STUCK VALVE!', 'CLICK IT LOOSE!']
+    const label = MODERN ? (m.type === 'valve' ? ['BREAKER TRIPPED!', 'CLICK TO RESET IT!'] : m.type === 'leak' ? ['HYDRAULIC LEAK!', 'PATCH IT UP!'] : [`${m.side.toUpperCase()} MOTOR FAULT!`, 'CLICK TO CLEAR IT!'])
+      : m.type === 'valve' ? ['STUCK VALVE!', 'CLICK IT LOOSE!']
       : m.type === 'leak' ? ['PIPE LEAK!', 'PATCH IT UP!']
       : [`${m.side.toUpperCase()} ENGINE JAMMED!`, 'CLICK TO FREE IT!'];
     setSign(sg.mal, true, label[0], `${label[1]} (${m.hits}/${m.needed})`, true, m.age > C.malfunctionGrace);
@@ -2576,7 +2891,7 @@ function updateSigns() {
 
   const sh = S.ship;
   const shNeedsLift = sh && SHIP_KINDS[sh.kind].needsLift;
-  const needAccum = live && (S.accumHint > 0 || (S.leverUp && S.stalled) ||
+  const needAccum = !MODERN && live && (S.accumHint > 0 || (S.leverUp && S.stalled) ||
     (shNeedsLift && sh.state === 'approach' && !S.leverUp && S.accum < C.raiseMinCharge));
   setSign(sg.accum, needAccum, '', 'ACCUMULATORS NEED TO BE AT THE TOP TO LIFT THE BRIDGE', false, S.accumHint > 0);
 
@@ -2586,8 +2901,9 @@ function updateSigns() {
   const moving = S.bridgeMoving;
   const lag = S.bridge - S.bridgeFar;
   const shipComing = sh && shNeedsLift && (sh.state === 'approach' || sh.state === 'passing');
-  const blockText = { gates: ['STOP THE TRAFFIC FIRST', 'CLOSE THE ROAD, THEN RAISE'], deck: ['TRAFFIC STILL ON THE BRIDGE', 'WAIT FOR IT TO CLEAR'], bridgeUp: ['LOWER THE BRIDGE FIRST', 'THEN OPEN THE ROAD'] };
-  if (live && S.enginesOut) setSign(sg.bridge, true, 'BRIDGE ENGINES STOPPED', S.enginesOut === 'steam' ? 'NO STEAM – STOKE THE BOILER!' : 'NO OIL – OIL THE MACHINERY!', true, true);
+  const blockText = { motors: ['MOTORS NOT RUNNING', 'START THEM AND LET THEM RUN UP'], gates: ['STOP THE TRAFFIC FIRST', 'CLOSE THE ROAD, THEN RAISE'], deck: ['TRAFFIC STILL ON THE BRIDGE', 'WAIT FOR IT TO CLEAR'], bridgeUp: ['LOWER THE BRIDGE FIRST', 'THEN OPEN THE ROAD'] };
+  if (live && S.enginesOut) setSign(sg.bridge, true, MODERN ? 'BRIDGE MOTORS STOPPED' : 'BRIDGE ENGINES STOPPED',
+    S.enginesOut === 'steam' ? 'NO STEAM – STOKE THE BOILER!' : S.enginesOut === 'tripped' ? 'OVERHEATED – LET THEM COOL' : MODERN ? 'NO OIL – TOP UP THE HYDRAULICS!' : 'NO OIL – OIL THE MACHINERY!', true, true);
   else if (live && S.blockHintT > 0 && blockText[S.blockHint]) setSign(sg.bridge, true, blockText[S.blockHint][0], blockText[S.blockHint][1], true, true);
   else if (live && Math.abs(lag) > 0.2) setSign(sg.bridge, true, 'LEAVES OUT OF STEP', `THE ${lag < 0 ? 'SOUTH' : 'NORTH'} LEAF IS LAGGING`, true, false);
   else if (live && moving > 0) setSign(sg.bridge, true, 'SAILING UP THE BRIDGE!', '', false, false);
@@ -2616,12 +2932,19 @@ function updateSigns() {
   } else setSign(sg.boat, false);
 
   // nudge the right control when something needs doing
-  el.coal.classList.toggle('nudge', live && p < C.pressureCool);
+  el.coal.classList.toggle('nudge', live && (MODERN ? !S.motorsOn && S.motorTripT <= 0 && !!sh && shNeedsLift && sh.state === 'approach' : p < C.pressureCool));
   el.oil.classList.toggle('nudge', live && S.oil < C.oilLow);
 }
 
 function updateHud() {
   el.panel.classList.toggle('continuing', S.continuing);
+  if (MODERN) {
+    el.coal.classList.toggle('on', S.motorsOn);
+    el.coal.classList.toggle('tripped', S.motorTripT > 0);
+    const t = S.motorTripT > 0 ? `TRIPPED – COOLING ${Math.ceil(S.motorTripT)}s`
+      : S.motorsOn ? (S.motorSpin < CONFIG.motorReady ? 'RUNNING UP…' : 'ON – CLICK TO STOP') : 'OFF – CLICK TO START';
+    if (el.motorState.textContent !== t) el.motorState.textContent = t;
+  }
   el.gates.classList.toggle('closed', S.gatesClosed);
   el.gates.setAttribute('aria-pressed', String(S.gatesClosed));
   const gateText = S.gatesClosed ? (bridgeAny(S) <= 0 && S.deckClearIn > 0 ? 'CLEARING' : 'STOPPED') : 'OPEN';
@@ -2672,7 +2995,7 @@ function showCard(name) {
 function fmtTime(s) { s = Math.floor(s); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
 
 const Records = (() => {
-  const KEY = 'bridgeMaster.records';
+  const KEY = MODERN ? 'bridgeMaster.records.modern' : 'bridgeMaster.records';
   const data = { bestTime: 0, bestStars: 0, bestShips: 0, bestContinueTime: 0, gamesPlayed: 0, wins: 0 };
   try { Object.assign(data, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch (e) { /* unavailable */ }
   function save() { try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (e) { /* unavailable */ } }
@@ -2774,7 +3097,10 @@ function showLose() {
   let sub = f.sub, tip = f.tip;
   if (S.failReason === 'collision' && S.failNote === 'accum') { sub = 'THE ACCUMULATORS HAD TOO LITTLE PRESSURE TO LIFT HER'; tip = 'Keep the boilers hot and the engines oiled so the weights are above the LIFT mark in time.'; }
   if (S.failReason === 'collision' && S.failNote === 'gates') { sub = 'THE ROAD WAS STILL OPEN, SO THE BRIDGE COULD NOT BE RAISED'; tip = 'Close the road gates well before a ship is due: the bridge must clear of traffic before it can lift.'; }
-  if (S.failReason === 'collision' && S.failNote === 'engines') { sub = 'THE BRIDGE ENGINES HAD STOPPED – NO STEAM OR NO OIL'; tip = 'Without steam and oil the bridge cannot move. Keep stoking the boiler and oiling the machinery.'; }
+  if (S.failReason === 'collision' && S.failNote === 'motors') { sub = "THE MOTORS WEREN'T RUNNING, SO THE BRIDGE COULD NOT LIFT"; tip = 'Start the motors early: they take a few seconds to run up to speed.'; }
+  if (S.failReason === 'collision' && S.failNote === 'engines' && MODERN) { sub = 'THE MOTORS HAD TRIPPED OR THE HYDRAULIC OIL RAN OUT'; tip = 'Switch the motors off between ships so they never overheat, and keep the oil topped up.'; }
+  else if (S.failReason === 'collision' && S.failNote === 'engines') { sub = 'THE BRIDGE ENGINES HAD STOPPED – NO STEAM OR NO OIL'; tip = 'Without steam and oil the bridge cannot move. Keep stoking the boiler and oiling the machinery.'; }
+  if (S.failReason === 'gridlock' && MODERN) tip = 'Lower the bridge as soon as each ship has passed to let the traffic through.';
   if (S.failReason === 'collision' && S.failNote === 'lowered') { sub = 'THE BRIDGE CAME DOWN BEFORE SHE HAD PASSED'; tip = 'Wait for the "SHIP HAS PASSED" sign before lowering the bridge.'; }
   $('lTitle').textContent = f.title;
   $('lSub').textContent = sub;
@@ -2795,15 +3121,15 @@ function showWin() {
   const stars = starRating(S);
   const pts = scoreBreakdown(S);
   $('wScore').textContent = pts.total;
-  $('wSteam').textContent = `STEAM ${pts.steam}/${CONFIG.scoreSteam}`;
+  $('wSteam').textContent = `${MODERN ? 'MOTORS' : 'STEAM'} ${pts.steam}/${CONFIG.scoreSteam}`;
   $('wShipPts').textContent = `SHIPS (${S.shipsPassed}) ${pts.ships}/${CONFIG.scoreShips}`;
   $('wTrafficPts').textContent = `TRAFFIC ${pts.traffic}/${CONFIG.scoreTraffic}`;
   $('wCare').textContent = `MACHINERY ${pts.care}/${CONFIG.scoreCare}`;
   const lost = [
-    ['steam', CONFIG.scoreSteam, 'Keep the pressure needle in the green: little and often with the coal.'],
+    ['steam', CONFIG.scoreSteam, MODERN ? 'Run the motors only when needed, so they never get hot or trip.' : 'Keep the pressure needle in the green: little and often with the coal.'],
     ['ships', CONFIG.scoreShips, 'Have the bridge fully up a few seconds before each ship arrives.'],
     ['traffic', CONFIG.scoreTraffic, 'Get the road open again quickly once a ship is through.'],
-    ['care', CONFIG.scoreCare, 'Top up the oil before it runs low, and fix faults straight away.'],
+    ['care', CONFIG.scoreCare, MODERN ? 'Top up the hydraulic oil before it runs low, and fix faults straight away.' : 'Top up the oil before it runs low, and fix faults straight away.'],
   ].map(([k, max, tip]) => ({ gap: max - pts[k], tip })).sort((a, b) => b.gap - a.gap)[0];
   $('wTip').textContent = lost.gap >= 3 ? lost.tip : '';
   $('wShips').textContent = S.shipsPassed;
@@ -2841,7 +3167,7 @@ function lockLandscape() {
 function startGame() {
   Sfx.init();
   goFullscreenLandscape();
-  S = createState();
+  S = createState(ERA);
   S.phase = 'playing';
   P.length = 0;
   V.drops.length = 0;
@@ -2885,7 +3211,7 @@ function onGameEvent(type, data) {
     case 'shovel': Sfx.shovel(); V.stoke = 0.5; V.sparkAt = V.t + 0.26; break;
     case 'oil':
       Sfx.oil();
-      V.drops.push({ y: 372, vy: 0, overfill: data.overfill });
+      V.drops.push({ y: LUBE.y - 78, vy: 0, overfill: data.overfill });
       break;
     case 'lever': Sfx.lever(data); break;
     case 'leverRefused':
@@ -2893,7 +3219,15 @@ function onGameEvent(type, data) {
       el.lever.classList.remove('shake'); void el.lever.offsetWidth; el.lever.classList.add('shake');
       say(data === 'gates' ? 'Stop the traffic first: close the road gates.'
         : data === 'deck' ? 'Wait: there is still traffic on the bridge.'
+        : data === 'motors' ? 'Start the motors first and let them run up.'
         : 'Not enough pressure in the accumulators to lift the bridge.');
+      break;
+    case 'motors': Sfx.lever(data); say(data ? 'Motors starting.' : 'Motors off.'); break;
+    case 'motorsTripped': Sfx.malfunctionPenalty(); V.shake = Math.max(V.shake, 3); say('The motors have overheated and tripped! Let them cool down.'); break;
+    case 'motorsRefused':
+      Sfx.refuse();
+      el.coal.classList.remove('shake'); void el.coal.offsetWidth; el.coal.classList.add('shake');
+      say('The motors are still cooling down.');
       break;
     case 'gates': Sfx.lever(data); Sfx.bell(); say(data ? 'Road gates closed.' : 'Road open.'); break;
     case 'gatesRefused':
@@ -2904,7 +3238,8 @@ function onGameEvent(type, data) {
     case 'repairHit': Sfx.clank(); break;
     case 'malfunctionStart':
       Sfx.malfunctionStart();
-      say(data === 'valve' ? 'A valve has stuck! Click it loose.'
+      say(MODERN ? (data === 'valve' ? 'A circuit breaker has tripped! Click to reset it.' : data === 'leak' ? 'A hydraulic pipe is leaking oil! Patch it up.' : `The ${S.malfunction.side} bascule motor has a fault! Click to clear it.`)
+        : data === 'valve' ? 'A valve has stuck! Click it loose.'
         : data === 'leak' ? 'A pipe is leaking! Patch it up.'
         : `The ${S.malfunction.side} bascule engine has jammed! Click it free.`);
       break;
@@ -2940,7 +3275,13 @@ function press(btn) {
   clearTimeout(btn._t); btn._t = setTimeout(() => btn.classList.remove('pressed'), 140);
 }
 const INPUT_COOLDOWN = 0.22; // seconds; stops the keyboard shortcuts firing faster than a real shovel/oiler stroke
+function doMotors() {
+  if (V.t - V.lastCoalT < INPUT_COOLDOWN) return;
+  V.lastCoalT = V.t;
+  press(el.coal); Sfx.init(); actMotors(S, !S.motorsOn);
+}
 function doCoal() {
+  if (MODERN) { doMotors(); return; }
   if (V.t - V.lastCoalT < INPUT_COOLDOWN) return;
   V.lastCoalT = V.t;
   press(el.coal); Sfx.init(); actShovel(S);
@@ -2997,6 +3338,7 @@ function moveGhost(p) { coalGhost.style.transform = `translate(${(p.x - 30).toFi
 el.coal.addEventListener('pointerdown', (e) => {
   if (e.button > 0) return;
   e.preventDefault();
+  if (MODERN) { doMotors(); return; }   // the motors are a switch, not something to drag
   Sfx.init();
   if (S.phase !== 'playing') { press(el.coal); return; }
   try { el.coal.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
@@ -3030,6 +3372,7 @@ oilGhost.hidden = false;
 oilGhost.innerHTML = el.oil.querySelector('.glyph').outerHTML.replace('class="glyph"', 'width="70" height="70"');
 stage.appendChild(oilGhost);
 let oilDrag = null;
+oilTarget.style.left = (LUBE.x - 40) + 'px'; oilTarget.style.top = (LUBE.y - 40) + 'px';
 const inLube = (p) => Math.hypot(p.x - LUBE.x, p.y - LUBE.y) < 58;
 function moveOilGhost(p) { oilGhost.style.transform = `translate(${(p.x - 35).toFixed(1)}px, ${(p.y - 35).toFixed(1)}px)`; }
 el.oil.addEventListener('pointerdown', (e) => {
@@ -3172,12 +3515,14 @@ function update(dt) {
     S.engineSpeed = approach(S.engineSpeed, 0, dt * 0.5);
     S.crank += S.engineSpeed * dt * TAU;
     S.bridgeMoving = 0;
+    S.motorSpin = approach(S.motorSpin, 0, dt * 0.5);
   }
 
   // smoothed displays
   const active = S.phase !== 'title';
   V.pressureShown = approach(V.pressureShown, active ? (S.failReason === 'burst' ? 244 : S.pressure) : 0, dt * 160);
   V.oilShown = approach(V.oilShown, S.oil, dt * 1.4);
+  V.heatShown = approach(V.heatShown, S.motorHeat, dt * 0.6);
   V.accShown = approach(V.accShown, S.accum, dt * 0.5);
   const prevBridge = V.bridgeShown, prevFar = V.bridgeFarShown;
   V.bridgeShown = approach(V.bridgeShown, S.bridge, dt * 0.35);
@@ -3194,13 +3539,13 @@ function update(dt) {
   const revs = S.engineSpeed / C.engineRevs;
   V.flow.steam += revs * 55 * dt;
   V.flow.feed += revs * 40 * dt;
-  V.flow.pump += (S.phase === 'playing' ? S.pumpEff * (S.accum < 1 ? 1 : 0.2) : revs * 0.3) * 60 * dt;
+  V.flow.pump += (S.phase === 'playing' ? S.pumpEff * (MODERN ? (bridgeMoving ? 1 : 0.25) : S.accum < 1 ? 1 : 0.2) : revs * 0.3) * 60 * dt;
   V.flow.pier += (bridgeMoving ? (bridgeRising ? 70 : -45) : 0) * dt;
   V.flow.walk += (bridgeMoving ? (bridgeRising ? 70 : -45) : 0) * dt;
 
   // chuffs, sparks, steam, drops
   const half = Math.floor(S.crank / Math.PI);
-  if (half !== V.halfRevs) { if (S.phase === 'playing') Sfx.chuff(revs); V.halfRevs = half; }
+  if (half !== V.halfRevs) { if (S.phase === 'playing' && !MODERN) Sfx.chuff(revs); V.halfRevs = half; }
   if (V.stoke > 0) V.stoke = Math.max(0, V.stoke - dt);
   if (V.coalHint > 0) V.coalHint -= dt;
   if (S.phase === 'playing' && S.enginesOut) {
@@ -3212,6 +3557,10 @@ function update(dt) {
   if (S.phase === 'playing' && S.pressure > C.pressureHigh) {
     V.puffT -= dt;
     if (V.puffT <= 0) { steamPuff(237, 456); V.puffT = 0.22 - 0.15 * clamp((S.pressure - C.pressureHigh) / 40, 0, 1); }
+  }
+  if (MODERN && S.phase === 'playing' && S.motorHeat > 0.85 && S.motorSpin > 0.05) {
+    V.puffT -= dt;
+    if (V.puffT <= 0) { steamPuff(rand(400, 540), 470, rand(3, 5), rand(-30, -18)); V.puffT = 0.3; }
   }
   for (let i = V.drops.length - 1; i >= 0; i--) {
     const d = V.drops[i];
@@ -3229,7 +3578,8 @@ function update(dt) {
   // continuous sounds
   const hiss = S.phase === 'playing' && S.pressure > C.pressureHigh ? 0.5 + clamp((S.pressure - C.pressureHigh) / 60, 0, 0.5) : 0;
   const squeal = S.phase === 'playing' && S.oil <= 0 && S.engineSpeed > 0.05 ? 0.55 + 0.45 * Math.sin(V.t * 2.3) : 0;
-  Sfx.setLoops(hiss, bridgeMoving ? 1 : 0, squeal);
+  if (MODERN) Sfx.setLoops(0, Math.max(bridgeMoving ? 1 : 0, S.phase === 'playing' ? S.motorSpin * 0.3 : 0), squeal);
+  else Sfx.setLoops(hiss, bridgeMoving ? 1 : 0, squeal);
 }
 
 let last = performance.now();
