@@ -630,18 +630,18 @@ const CONFIG = {
   // Ships
   firstShipMin: 10,
   firstShipMax: 14,
-  shipIntervalMin: 40,        // seconds between ships that need a lift, so the road gets a
-  shipIntervalMax: 50,        // proper spell open between closures
+  shipIntervalMin: 46,        // seconds between ships that need a lift, so the road gets a
+  shipIntervalMax: 56,        // proper spell open between closures
   shipIntervalRamp: 0.9,      // interval multiplier reached at 00:00
   smallBoatGapMul: 0.4,       // a small boat (no lift) only uses up this share of a gap
   approachTimeStart: 13,      // seconds from sighting to reaching the bridge
   approachTimeEnd: 10.5,
-  passSpeed: 85,              // px/s once the ship is under the bridge
+  passSpeed: 43,              // once under the bridge: ~4.5 knots at the shared real-world scale (see VEH)
   northEngineRate: 0.85,      // the north leaf's engines are fed across the walkway, so run a little slower
 
   // Road traffic (0–1)
   trafficFill: 0.0095,        // per second while the road is closed
-  deckClearTime: 4,           // seconds, after the gates close, for the last traffic to get off the bridge
+  deckClearTime: 6,           // seconds, after the gates close, for the last traffic to get off the bridge
   trafficDrain: 0.06,         // per second while it is down
   trafficWarn: 0.7,
   trafficQueueCarsMax: 6,      // vehicles queued at 100% traffic
@@ -1879,7 +1879,12 @@ function drawBridge(g, frac) {
 }
 
 // ---------- road traffic ----------
-const VEH = { cab: { len: 78, speed: 70 }, cart: { len: 82, speed: 54 }, coach: { len: 88, speed: 62 }, bus: { len: 112, speed: 56 } };
+// Speeds share one real-world scale with the ships: the 61 m opening between the piers is
+// 320 px, and the game clock runs about 5x fast. That makes a walk (1.4 m/s) ~37 px/s, a
+// run (~4.3 m/s) ~115 px/s, a trotting cab (3.5 m/s) ~92 px/s, and a ship under the bridge
+// (~4.5 knots) CONFIG.passSpeed.
+const PED_WALK = [32, 42], PED_RUN = [108, 124];
+const VEH = { cab: { len: 78, speed: 92 }, cart: { len: 82, speed: 64 }, coach: { len: 88, speed: 84 }, bus: { len: 112, speed: 74 } };
 const VEH_KINDS = ['cab', 'cab', 'cart', 'coach', 'bus', 'cart', 'cab'];
 
 function makeCar(x) {
@@ -1889,14 +1894,14 @@ function makeCar(x) {
 }
 function makePed(x) {
   const kind = Math.random() < 0.5 ? 'man' : 'lady';
-  return { kind, len: 14, speed: rand(18, 26), v: 20, x: x === undefined ? -18 : x, ph: rand(0, TAU), roll: 0, alpha: 1, fade: false, moving: true, parasol: Math.random() < 0.35 };
+  return { kind, len: 14, speed: rand(...PED_WALK), runSpeed: rand(...PED_RUN), running: false, v: 36, x: x === undefined ? -18 : x, ph: rand(0, TAU), roll: 0, alpha: 1, fade: false, moving: true, parasol: Math.random() < 0.35 };
 }
 
 function roadClosed() { return S.gatesClosed || bridgeAny(S) > 0 || S.leverUp || Math.max(V.bridgeShown, V.bridgeFarShown) > 0.002; }
 // Once the gates shut with the bridge still down, anything already past them hurries on
 // across to the north road; the bridge counts as clear only once they're all off it.
 const onDeck = (v) => v.x + v.len > STOP_X + 0.5 && v.x < FAR_ROAD_X;
-const hurrySpeed = (v) => (v.len < 20 ? 90 : v.speed * 2.2);
+const hurrySpeed = (v) => (v.runSpeed || v.speed * 1.4);
 
 function updateLane(list, gap, dt, queueCap) {
   const closed = roadClosed();
@@ -1916,10 +1921,11 @@ function updateLane(list, gap, dt, queueCap) {
     const front = v.x + v.len;
     let limit = Infinity;
     let top = v.speed;
+    v.running = false;
     if (closed) {
       if (v.x >= FAR_ROAD_X) { /* already across, on the north road */ }
       else if (front <= STOP_X + 0.5) limit = STOP_X;
-      else if (clearing) top = hurrySpeed(v);
+      else if (clearing) { top = hurrySpeed(v); v.running = true; }
       else if (front <= HEEL_X + 0.5) limit = HEEL_X;
       else v.fade = true;
     } else if (held && held.has(v)) {
@@ -1934,7 +1940,7 @@ function updateLane(list, gap, dt, queueCap) {
     if (nf > limit) { nf = Math.max(front, limit); v.v = 0; }
     v.x = nf - v.len;
     v.moving = v.v > 2;
-    v.ph += v.v * dt * 0.3;
+    v.ph += v.v * dt * (v.runSpeed ? (v.running ? 0.1 : 0.18) : 0.3);
     v.roll += v.v * dt;
     if (nf > TIP_FADE) v.alpha = Math.min(v.alpha, 1 - (nf - TIP_FADE) / 70);
     if (v.fade) v.alpha -= dt * 2.5;
@@ -2069,6 +2075,7 @@ function drawCar(g, v) {
 function drawPed(g, v) {
   const x = v.x, gy = ROAD_Y - 1;
   const s = v.moving ? Math.sin(v.ph * 2.2) : 0;
+  if (v.running && v.moving) { drawRunner(g, v, x, gy, s); return; }
   if (v.kind === 'man') {
     g.lineWidth = 2; g.lineCap = 'round';
     line(g, x + 6, gy - 11, x + 6 + s * 4, gy); line(g, x + 6, gy - 11, x + 6 - s * 4, gy);
@@ -2089,6 +2096,31 @@ function drawPed(g, v) {
       g.beginPath(); g.arc(x + 11, gy - 34 - b, 8, Math.PI, TAU); g.fill();
     }
   }
+}
+
+function drawRunner(g, v, x, gy, s) {
+  const b = Math.abs(s) * 2;            // bounce
+  g.save(); g.translate(x + 7, gy - b); g.rotate(0.28); g.translate(-7, 0);   // lean into it
+  g.lineCap = 'round';
+  if (v.kind === 'man') {
+    g.lineWidth = 2.2;
+    line(g, 6, -11, 6 + s * 8, -1 + Math.max(0, s) * -3); line(g, 6, -11, 6 - s * 8, -1 + Math.max(0, -s) * -3);
+    g.beginPath(); g.moveTo(3, -24); g.lineTo(9, -24); g.lineTo(10.5, -10); g.lineTo(1.5, -10); g.closePath(); g.fill();
+    g.lineWidth = 1.6; line(g, 6, -22, 6 - s * 6, -15); line(g, 6, -22, 6 + s * 6, -16);
+    circle(g, 6, -27, 3.1); g.fill();
+    g.fillRect(3.6, -35, 4.8, 6.5); g.fillRect(2, -30, 8, 1.6);
+  } else {
+    g.lineWidth = 1.8;
+    line(g, 7, -8, 7 + s * 6, 0); line(g, 7, -8, 7 - s * 6, 0);   // skirts gathered up, feet showing
+    g.beginPath(); g.moveTo(6, -17); g.quadraticCurveTo(0, -10, 1, -6); g.lineTo(13, -6); g.quadraticCurveTo(13, -11, 9, -17); g.closePath(); g.fill();
+    g.fillRect(5.5, -25, 4, 9);
+    g.lineWidth = 1.4; line(g, 8, -22, 12, -14);
+    circle(g, 7.5, -28, 3); g.fill();
+    g.beginPath(); g.ellipse(7.5, -31, 5, 1.6, 0, 0, TAU); g.fill();
+    if (v.parasol) { g.lineWidth = 1; line(g, 5, -22, 0, -12); }   // parasol furled and tucked under the arm
+  }
+  g.restore();
+  g.lineCap = 'butt';
 }
 
 function drawTraffic(g) {
