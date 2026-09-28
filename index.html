@@ -843,6 +843,25 @@ const SHIP_KINDS = {
   cruise:  { weight: 2.5, needsLift: true,  approachMul: 1.25, passMul: 0.75, label: 'A CRUISE SHIP', title: 'CRUISE SHIP AHEAD', outline: 'cruise', eras: ['modern'] },
   yacht:   { weight: 3,   needsLift: true,  approachMul: 0.85, passMul: 1.15, label: 'A SUPERYACHT', title: 'YACHT APPROACHING', outline: 'yacht', eras: ['modern'] },
 };
+// A real-world clock: the elapsed shift maps onto a 24-hour day at the same compression
+// ratio that already matches each era's real lift frequency to the game's ship interval,
+// so 2 minutes of play is about 3 real hours in 1894 and about a real day today — Tower
+// Bridge lifted roughly 6,194 times in 1894 and lifts about 800 times a year now.
+const REAL_LIFTS_PER_YEAR = { victorian: 6194, modern: 800 };
+function hourOfDay(t, era, startHour) {
+  const realLiftInterval = 365 * 24 * 3600 / REAL_LIFTS_PER_YEAR[era];
+  const avgGameShipGap = (CONFIG.shipIntervalMin + CONFIG.shipIntervalMax) / 2;
+  const gameSecPerHour = 3600 / (realLiftInterval / avgGameShipGap);
+  return (startHour + t / gameSecPerHour) % 24;
+}
+// Busiest at the two daily commuting peaks, quietest overnight; a shared shape (only the
+// real daily totals it's applied to differ between the eras) that averages to roughly 1
+// across a day, so it nudges the pace up and down without changing the overall average.
+function rushMul(hour) {
+  const bump = (h, c, w) => Math.exp(-((h - c) * (h - c)) / (2 * w * w));
+  const overnight = hour < 5 || hour > 23 ? 0.5 : hour < 7 ? 0.7 : 1;
+  return overnight * (0.75 + 0.3 * bump(hour, 8.5, 1.6) + 0.35 * bump(hour, 17.5, 1.8));
+}
 function pickShipKind(allowUrgent, era = 'victorian') {
   const names = Object.keys(SHIP_KINDS).filter((n) => SHIP_KINDS[n].weight > 0 && (allowUrgent || !SHIP_KINDS[n].urgent) &&
     (!SHIP_KINDS[n].eras || SHIP_KINDS[n].eras.includes(era)));
@@ -855,7 +874,7 @@ function pickShipKind(allowUrgent, era = 'victorian') {
 // The elapsed-time (seconds) and kind of each ship to appear this game. The first ship
 // is always an ordinary one, and the second is never the urgent kind, so the player
 // meets the basic mechanic before facing a tight deadline.
-function generateShipSchedule(era) {
+function generateShipSchedule(era, startHour) {
   const C = CONFIG;
   const sched = [];
   let t = rand(C.firstShipMin, C.firstShipMax);
@@ -865,18 +884,25 @@ function generateShipSchedule(era) {
     if (C.gameDuration - t <= approachTime + 1) break;
     const kind = sched.length === 0 ? 'tall' : pickShipKind(sched.length >= 2, era);
     sched.push({ t, kind });
-    t += shipGap(kind, lerp(1, C.shipIntervalRamp, k));
+    t += shipGap(kind, lerp(1, C.shipIntervalRamp, k), t, era, startHour);
   }
   return sched;
 }
-function shipGap(kind, mul) {
-  return rand(CONFIG.shipIntervalMin, CONFIG.shipIntervalMax) * mul * (SHIP_KINDS[kind].needsLift ? 1 : CONFIG.smallBoatGapMul);
+function shipGap(kind, mul, t = 0, era = 'victorian', startHour = 7) {
+  // Clamped so the daily rhythm nudges the pace rather than ever producing an
+  // unreasonably short or long gap between ships.
+  const rush = clamp(rushMul(hourOfDay(t, era, startHour)), 0.8, 1.25);
+  return rand(CONFIG.shipIntervalMin, CONFIG.shipIntervalMax) * mul / rush * (SHIP_KINDS[kind].needsLift ? 1 : CONFIG.smallBoatGapMul);
 }
 
 function createState(era = 'victorian') {
+  // A random hour for the shift to begin at (see hourOfDay/rushMul): sometimes the calm
+  // small hours, sometimes right in a commuting rush, sometimes a quiet midday — a
+  // different day each time, not the same rhythm on every game.
+  const dayStartHour = rand(0, 24);
   return {
     phase: 'title',            // title | playing | paused | failing | over | won
-    era, elapsed: 0, continuing: false,
+    era, dayStartHour, elapsed: 0, continuing: false,
     motorsOn: false, motorSpin: 0, motorHeat: CONFIG.motorHeatStart, motorTripT: 0, motorTrips: 0,
     pressure: CONFIG.pressureStart, coalBurns: [], overTime: 0, idealTime: 0,
     oil: CONFIG.oilStart, oilTank: rand(CONFIG.oilTankMin, CONFIG.oilTankMax), enginesOut: null,
@@ -886,7 +912,7 @@ function createState(era = 'victorian') {
     bridge: 0, bridgeFar: 0, leverUp: false, bridgeMoving: 0, stalled: false,
     gatesClosed: false, deckClearIn: 0, blockHint: null, blockHintT: 0,
     ship: null, shipCount: 0, shipsPassed: 0, grandPassed: 0, urgentPassed: 0, passedAt: -99,
-    shipSchedule: generateShipSchedule(era), nextShipIdx: 0,
+shipSchedule: generateShipSchedule(era, dayStartHour), nextShipIdx: 0,
     traffic: 0, peakTraffic: 0, trafficSum: 0,
     careTime: 0, faultPenalties: 0, upSince: null, shipMargins: [],
     failReason: null, failTimer: 0, failNote: null,
@@ -1223,7 +1249,7 @@ function extendShipSchedule(S) {
   const C = CONFIG;
   while (S.shipSchedule.length - S.nextShipIdx < 2) {
     const prev = S.shipSchedule[S.shipSchedule.length - 1];
-    const t = prev ? Math.max(prev.t + shipGap(prev.kind, C.shipIntervalRamp), S.elapsed) : S.elapsed + shipGap('tall', C.shipIntervalRamp);
+    const t = prev ? Math.max(prev.t + shipGap(prev.kind, C.shipIntervalRamp, prev.t, S.era, S.dayStartHour), S.elapsed) : S.elapsed + shipGap('tall', C.shipIntervalRamp, S.elapsed, S.era, S.dayStartHour);
     S.shipSchedule.push({ t, kind: pickShipKind(true, S.era) });
   }
 }
@@ -2260,8 +2286,22 @@ function drawBridge(g, frac) {
 // ~shipIntervalMin..Max seconds, so the clock runs ROAD_TIME times too fast, and the
 // people and carriages move at their real speeds times that. Distances use the bridge
 // itself: the 61 m opening between the piers is 320 px.
-const REAL_LIFT_INTERVAL = 365 * 24 * 3600 / (MODERN ? 850 : 6160);   // today: about 850 lifts a year
+const REAL_LIFT_INTERVAL = 365 * 24 * 3600 / REAL_LIFTS_PER_YEAR[ERA];
 const ROAD_TIME = REAL_LIFT_INTERVAL / ((CONFIG.shipIntervalMin + CONFIG.shipIntervalMax) / 2);
+const GAME_SEC_PER_HOUR = 3600 / ROAD_TIME;
+// Real daily totals (see the commit message for sources): Tower Bridge in its first year
+// (from July 1894) carried about 60,000 pedestrians and 8,000 horse-drawn vehicles a day;
+// today it carries about 40,000 people and 21,000 vehicles a day. The absolute spawn pace
+// below is tuned for a playable, legible road — these totals set how that pace compares
+// between pedestrians and vehicles, and between the two eras, not a literal one-to-one count.
+const DAILY = MODERN ? { peds: 40000, vehicles: 21000 } : { peds: 60000, vehicles: 8000 };
+const PED_RATE_MUL = DAILY.peds / 60000, VEH_RATE_MUL = DAILY.vehicles / 8000;
+// Everything shares hourOfDay/rushMul with the ship schedule in CORE, so the ships and the
+// road speed up and quiet down together through the same rush hours and small hours.
+function roadPace(hour, [lo, hi], rateMul) {
+  const mul = clamp(rateMul * rushMul(hour), 0.03, 12);
+  return [lo / mul, hi / mul];
+}
 const PX_PER_M = (GEOM.farPierFace - 1130) / 61;
 const realSpeed = (mps) => mps * PX_PER_M * ROAD_TIME;              // m/s -> px per game second
 const ROAD_ACCEL = realSpeed(1) * ROAD_TIME, ROAD_BRAKE = 2 * ROAD_ACCEL;   // ~1 and 2 m/s², real
@@ -2351,11 +2391,11 @@ function updateTraffic(dt) {
     S.deckClearIn = t;
   }
   const closed = roadClosed();
-  const busy = S.phase === 'playing' && S.traffic > 0.05;
+  const hour = hourOfDay(S.elapsed, ERA, S.dayStartHour);
   V.carT -= dt; V.pedT -= dt;
   if (V.carT <= 0) {
     let spawn = true, next;
-    if (!closed) next = busy ? rand(0.5, 0.8) : rand(0.9, 1.5);   // at road speed each is across in a second or two
+    if (!closed) next = rand(...roadPace(hour, [0.5, 0.8], VEH_RATE_MUL));   // at road speed each is across in a second or two
     else {
       const queued = V.cars.filter((v) => v.x + v.len <= STOP_X + 1).length;
       spawn = queued < Math.round(S.traffic * CONFIG.trafficQueueCarsMax);
@@ -2365,7 +2405,7 @@ function updateTraffic(dt) {
   }
   if (V.pedT <= 0) {
     let spawn = true, next;
-    if (!closed) next = rand(0.08, 0.2);
+    if (!closed) next = rand(...roadPace(hour, [0.08, 0.2], PED_RATE_MUL));
     else {
       const queued = V.peds.filter((v) => v.x + v.len <= STOP_X + 1).length;
       spawn = queued < Math.round(S.traffic * CONFIG.trafficQueuePedsMax);
