@@ -156,6 +156,31 @@ button:focus-visible, #lever:focus-visible { outline: 3px solid var(--blue); out
 .record-badge.show { opacity: .85; }
 .card-buttons { display: flex; justify-content: center; gap: 18px; flex-wrap: wrap; margin-top: 20px; }
 .card-buttons .stamp { margin-top: 0; }
+
+/* ---------- main menu: saved-games view, swapped in over the how-to-play view ---------- */
+.menu-view-saves { display: none; }
+#cardStart.saves .menu-view-play { display: none; }
+#cardStart.saves .menu-view-saves { display: block; }
+.saves-head { margin: 0; font-weight: 400; font-size: 46px; line-height: 1; color: #4a3f33; letter-spacing: 1px; }
+#saveSlots { max-height: 300px; overflow-y: auto; margin: 16px 0 0; padding: 0 2px; display: flex; flex-direction: column; gap: 10px; }
+#saveSlots .empty { font: italic 400 17px var(--serif); color: #7a6d5d; margin: 30px 0; }
+.save-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 10px 16px; border-radius: 6px; background: rgba(122,109,93,.1); border: 1px solid rgba(122,109,93,.28);
+}
+.save-info { text-align: left; display: flex; flex-direction: column; gap: 2px; }
+.save-info .era { font: 700 13px var(--stencil); letter-spacing: 1px; color: #7a6d5d; }
+.save-info b { font: 400 20px var(--serif); color: #3b342d; }
+.save-info small { font: 400 13px var(--serif); color: #9a8d7a; }
+.save-actions { display: flex; gap: 8px; flex: none; }
+.mini-btn {
+  font: 700 13px var(--stencil); letter-spacing: 1px; padding: 8px 14px; border-radius: 4px; border: none; cursor: pointer;
+  color: #f4f0e6; background: #4a3f33; transition: filter .12s, transform .08s;
+}
+.mini-btn:hover { filter: brightness(1.15); }
+.mini-btn:active { transform: translateY(1px); }
+.mini-btn.del { background: #7a1f1f; }
+.menu-view-saves .card-buttons { margin-top: 18px; }
 @media (hover: hover) and (pointer: fine) { .keys { display: block; } }
 .stamp {
   display: inline-block; margin-top: 20px; padding: 12px 54px 10px; font-size: 46px; line-height: 1; font-weight: 400;
@@ -427,6 +452,7 @@ body.modern #btnCoal .l { font-size: 70px; }
         </svg>
         <h1>HAVE A GO...</h1>
       </div>
+      <div class="menu-view menu-view-play">
       <p class="lead">TRY BEING A BRIDGE MASTER AND KEEP EVERYTHING<br>RUNNING SMOOTHLY FOR <span class="hl">2 MINUTES</span></p>
       <ol class="how">
         <li><b>1</b><span>Drag coal up into the boiler to keep the needle between 100 and 180 – never in the red.</span></li>
@@ -434,9 +460,21 @@ body.modern #btnCoal .l { font-size: 70px; }
         <li><b>3</b><span>Wait for the accumulator weights to rise past the LIFT mark.</span></li>
         <li><b>4</b><span>Close the road and wait for the bridge to clear, then raise it for each ship. Lower it and reopen the road after.</span></li>
       </ol>
-      <button class="stamp" id="btnStart">START</button>
+      <div class="card-buttons">
+        <button class="stamp" id="btnStart">START</button>
+        <button class="stamp dark" id="btnShowSaves">SAVED GAMES</button>
+      </div>
       <p class="best-line" id="bestLine"></p>
       <div class="keys">Keys: C coal · O oil · T road gates · ↑ ↓ bridge · Space start · P pause · M sound</div>
+      </div>
+      <div class="menu-view menu-view-saves">
+        <h1 class="saves-head">SAVED GAMES</h1>
+        <p class="lead">EITHER ERA, PICKED UP JUST WHERE YOU LEFT THEM</p>
+        <div id="saveSlots"></div>
+        <div class="card-buttons">
+          <button class="stamp dark" id="btnSavesBack">BACK</button>
+        </div>
+      </div>
     </div></div>
 
     <div class="card" id="cardWin" style="--rot:.5deg"><div class="paper">
@@ -484,6 +522,7 @@ body.modern #btnCoal .l { font-size: 70px; }
       <p class="lead">THE ENGINES ARE WAITING FOR YOU</p>
       <div class="card-buttons">
         <button class="stamp dark" id="btnResume">RESUME</button>
+        <button class="stamp" id="btnSaveGame">SAVE GAME</button>
         <button class="stamp" id="btnResetPause">RESET</button>
       </div>
     </div></div>
@@ -2950,6 +2989,7 @@ const el = {
   malSpot: $('malSpot'),
   track: $('track'), trackBoat: $('trackBoat'),
   cards: { start: $('cardStart'), win: $('cardWin'), lose: $('cardLose'), pause: $('cardPause') },
+  saveSlots: $('saveSlots'),
   coal: $('btnCoal'), oil: $('btnOil'), mute: $('btnMute'), pause: $('btnPause'),
   gates: $('gates'), gateState: $('gateState'),
   lever: $('lever'), handle: $('handle'), lblLower: $('lblLower'), lblRaise: $('lblRaise'), curve: $('curve'),
@@ -3154,6 +3194,7 @@ function updateHud() {
 }
 
 function showCard(name) {
+  if (name !== 'start') $('cardStart').classList.remove('saves');
   for (const [k, c] of Object.entries(el.cards)) c.classList.toggle('show', k === name);
   const btn = name && el.cards[name].querySelector('.stamp');
   if (btn) setTimeout(() => btn.focus({ preventScroll: true }), 60);
@@ -3169,6 +3210,32 @@ const SaveGame = (() => {
     write(state) { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* unavailable */ } },
     read() { try { const j = localStorage.getItem(KEY); return j ? JSON.parse(j) : null; } catch (e) { return null; } },
     clear() { try { localStorage.removeItem(KEY); } catch (e) { /* unavailable */ } },
+  };
+})();
+
+const SavedGames = (() => {
+  const KEY = 'bridgeMaster.savedGames';
+  const MAX_PER_ERA = 4;
+  function readAll() { try { return Object.assign({ victorian: [], modern: [] }, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch (e) { return { victorian: [], modern: [] }; } }
+  function writeAll(d) { try { localStorage.setItem(KEY, JSON.stringify(d)); } catch (e) { /* unavailable */ } }
+  return {
+    // Newest first, across both eras, each tagged with which era it belongs to.
+    list() {
+      const d = readAll();
+      return ['victorian', 'modern'].flatMap((era) => d[era].map((slot) => ({ ...slot, era })))
+        .sort((a, b) => b.ts - a.ts);
+    },
+    save(state, era) {
+      const d = readAll();
+      const arr = d[era] || (d[era] = []);
+      const id = 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      arr.unshift({ id, ts: Date.now(), elapsed: state.elapsed, shipsPassed: state.shipsPassed, continuing: state.continuing, snapshot: state });
+      while (arr.length > MAX_PER_ERA) arr.pop();
+      writeAll(d);
+      return id;
+    },
+    get(id, era) { return (readAll()[era] || []).find((slot) => slot.id === id) || null; },
+    remove(id, era) { const d = readAll(); d[era] = (d[era] || []).filter((slot) => slot.id !== id); writeAll(d); },
   };
 })();
 
@@ -3384,6 +3451,47 @@ function resumeGame() {
   showCard(null);
 }
 function togglePause() { if (S.phase === 'playing') pauseGame(); else if (S.phase === 'paused') resumeGame(); }
+// Drops a saved (or autosaved) snapshot into the live game, paused and ready to resume —
+// used both when a saved run is restored at boot and when one is loaded from the menu.
+function applyLoadedState(snapshot) {
+  S = Object.assign(createState(ERA), snapshot, { phase: 'paused' });
+  P.length = 0;
+  V.drops.length = 0;
+  buildShipLog();
+  el.body.classList.remove('idle');
+  V.pressureShown = S.pressure; V.oilShown = S.oil; V.accShown = S.accum;
+  V.bridgeShown = S.bridge; V.bridgeFarShown = S.bridgeFar; V.heatShown = S.motorHeat;
+  SaveGame.write(S);   // keep the autosave in step, so a later refresh continues from here too
+  showCard('pause');
+}
+function loadSavedGame(row) {
+  if (row.era === ERA) {
+    applyLoadedState(row.snapshot);
+    say('Loaded saved game. Resume when ready.');
+    return;
+  }
+  // A save from the other era: hand off to that era's page, carrying the slot id with it.
+  const params = new URLSearchParams();
+  if (row.era === 'modern') params.set('era', 'modern');
+  params.set('load', row.id);
+  location.href = location.pathname + '?' + params.toString();
+}
+function renderSaveSlots() {
+  const rows = SavedGames.list();
+  el.saveSlots.innerHTML = '';
+  if (!rows.length) { el.saveSlots.innerHTML = '<p class="empty">No saved games yet — save one from the pause menu.</p>'; return; }
+  for (const row of rows) {
+    const div = document.createElement('div'); div.className = 'save-row';
+    const when = new Date(row.ts).toLocaleString();
+    const tag = row.continuing ? ' · EXTRA TIME' : '';
+    div.innerHTML = `<div class="save-info"><span class="era">${row.era === 'modern' ? 'MODERN' : 'VICTORIAN'}</span>
+        <b>${fmtTime(row.elapsed)} survived · ${row.shipsPassed} ships${tag}</b><small>${when}</small></div>
+      <div class="save-actions"><button class="mini-btn load">LOAD</button><button class="mini-btn del">DELETE</button></div>`;
+    div.querySelector('.load').addEventListener('click', () => loadSavedGame(row));
+    div.querySelector('.del').addEventListener('click', () => { SavedGames.remove(row.id, row.era); renderSaveSlots(); });
+    el.saveSlots.appendChild(div);
+  }
+}
 // Abandons the run in progress (from the pause menu) and goes back to the start card,
 // without counting it as a loss.
 function resetGame() {
@@ -3617,6 +3725,14 @@ $('btnContinue').addEventListener('click', continueGame);
 $('btnRetry').addEventListener('click', startGame);
 $('btnResume').addEventListener('click', resumeGame);
 $('btnResetPause').addEventListener('click', resetGame);
+$('btnSaveGame').addEventListener('click', () => {
+  SavedGames.save(S, ERA);
+  say('Game saved.');
+  const btn = $('btnSaveGame'); const was = btn.textContent;
+  btn.textContent = 'SAVED!'; setTimeout(() => { btn.textContent = was; }, 1000);
+});
+$('btnShowSaves').addEventListener('click', () => { renderSaveSlots(); $('cardStart').classList.add('saves'); });
+$('btnSavesBack').addEventListener('click', () => { $('cardStart').classList.remove('saves'); });
 
 // Rotary lever: drag or swipe it round, or tap either side of the dial.
 let drag = null;
@@ -3796,15 +3912,18 @@ layout();
 populateRoad();
 updateBestLine();
 {
-  const saved = SaveGame.read();
-  if (saved && (saved.phase === 'playing' || saved.phase === 'paused')) {
-    S = Object.assign(createState(ERA), saved, { phase: 'paused' });
-    buildShipLog();
-    el.body.classList.remove('idle');
-    V.pressureShown = S.pressure; V.oilShown = S.oil; V.accShown = S.accum;
-    V.bridgeShown = S.bridge; V.bridgeFarShown = S.bridgeFar; V.heatShown = S.motorHeat;
-    showCard('pause');
-    say('Picked up where you left off. Resume when ready.');
+  const loadId = (() => { try { return new URLSearchParams(location.search).get('load'); } catch (e) { return null; } })();
+  const wanted = loadId && SavedGames.get(loadId, ERA);
+  if (wanted) {
+    applyLoadedState(wanted.snapshot);
+    say('Loaded saved game. Resume when ready.');
+    try { const u = new URL(location.href); u.searchParams.delete('load'); history.replaceState(null, '', u.pathname + (u.search || '')); } catch (e) { /* ignore */ }
+  } else {
+    const saved = SaveGame.read();
+    if (saved && (saved.phase === 'playing' || saved.phase === 'paused')) {
+      applyLoadedState(saved);
+      say('Picked up where you left off. Resume when ready.');
+    }
   }
 }
 requestAnimationFrame(frame);
