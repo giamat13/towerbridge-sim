@@ -108,6 +108,12 @@ button:focus-visible, #lever:focus-visible { outline: 3px solid var(--blue); out
 .colon { color: #ecece8; font-size: 32px; line-height: 46px; padding: 0 1px; font-weight: 400; }
 #clock.urgent .d { color: #b3261e; }
 
+/* ---------- time of day ---------- */
+#daytime { position: absolute; left: 262px; top: 14px; width: 128px; height: 56px; z-index: 4; filter: drop-shadow(0 3px 4px rgba(0,0,0,.3)); }
+#daytime .paper { height: 100%; display: flex; align-items: center; justify-content: center; gap: 7px; padding: 0 10px; }
+#daytime .lbl { font-size: 13px; letter-spacing: .5px; line-height: 1; }
+#daytime b { font-size: 25px; font-weight: 400; font-variant-numeric: tabular-nums; }
+
 /* ---------- traffic meter ---------- */
 #tmeter { position: absolute; left: 604px; top: 14px; width: 356px; height: 56px; z-index: 4; filter: drop-shadow(0 3px 4px rgba(0,0,0,.3)); }
 #tmeter .paper { height: 100%; display: flex; align-items: center; gap: 12px; padding: 0 16px; }
@@ -399,6 +405,10 @@ body.modern #btnCoal .l { font-size: 70px; }
         <div class="digits"><span class="d">0</span><span class="d">2</span><span class="colon">:</span><span class="d">0</span><span class="d">0</span></div>
       </div>
     </div>
+
+    <div id="daytime" aria-hidden="true"><div class="paper">
+      <div class="lbl">TIME</div><b id="daytimeT">07:00</b>
+    </div></div>
 
     <div id="tmeter" aria-hidden="true"><div class="paper">
       <div class="lbl">TRAFFIC</div>
@@ -1596,9 +1606,7 @@ const accTop = (c) => 452 - 162 * c;
 
 // ---------- cached background layer ----------
 function drawBackground(g) {
-  const sky = g.createLinearGradient(0, 0, 0, ROAD_Y);
-  sky.addColorStop(0, '#f4f3ef'); sky.addColorStop(1, '#e2e1dc');
-  g.fillStyle = sky; g.fillRect(0, 0, W, ROAD_Y + 1);
+  // (the sky itself is painted live behind this layer, see drawSky)
   g.fillStyle = '#e2e1dc'; g.fillRect(PIER_FACE, ROAD_Y, W - PIER_FACE, WATER_Y - ROAD_Y + 1);
 
   g.fillStyle = 'rgba(255,255,255,0.6)';
@@ -3018,6 +3026,65 @@ function layout() {
   stage.style.visibility = 'visible';
 }
 
+// ---- the sky: follows the time of day (hourOfDay) from dawn through sunset to night ----
+const SKY_KEYS = [  // [hour, top, bottom, how dark the skyline is tinted]
+  [0, '#2b3350', '#47506c', 0.5], [4.5, '#2b3350', '#47506c', 0.5], [6, '#c9c3cf', '#f0cfa8', 0.12], [8, '#f4f3ef', '#e2e1dc', 0],
+  [16, '#f4f3ef', '#e2e1dc', 0], [17.5, '#e9d3c2', '#f4c58e', 0.06], [18.5, '#cf9a86', '#ee8f5a', 0.16],
+  [19.5, '#6b5f7e', '#c9805f', 0.34], [21, '#2b3350', '#47506c', 0.5], [24, '#2b3350', '#47506c', 0.5],
+];
+const SUNRISE = 6, SUNSET = 18.5;
+function hexMix(a, b, t) {
+  const c = (h, i) => parseInt(h.slice(1 + i * 2, 3 + i * 2), 16);
+  return '#' + [0, 1, 2].map((i) => Math.round(lerp(c(a, i), c(b, i), t)).toString(16).padStart(2, '0')).join('');
+}
+function skyAt(hour) {
+  let i = 0;
+  while (i < SKY_KEYS.length - 2 && hour >= SKY_KEYS[i + 1][0]) i++;
+  const [h0, t0, b0, d0] = SKY_KEYS[i], [h1, t1, b1, d1] = SKY_KEYS[i + 1];
+  const k = clamp((hour - h0) / (h1 - h0), 0, 1);
+  return { top: hexMix(t0, t1, k), bottom: hexMix(b0, b1, k), dark: lerp(d0, d1, k) };
+}
+// Sun and moon each cross the sky in an arc and sink behind the skyline and the road.
+function skyBody(hour, rise, set) {
+  const f = (hour - rise) / (set - rise);
+  if (f < 0 || f > 1) return null;
+  return { x: lerp(140, 1460, f), y: ROAD_Y + 34 - Math.sin(f * Math.PI) * (ROAD_Y - 80), low: 1 - Math.sin(f * Math.PI) };
+}
+function drawSky(g, hour) {
+  const c = skyAt(hour);
+  const sky = g.createLinearGradient(0, 0, 0, ROAD_Y);
+  sky.addColorStop(0, c.top); sky.addColorStop(1, c.bottom);
+  g.fillStyle = sky; g.fillRect(0, 0, W, ROAD_Y + 1);
+  const sun = skyBody(hour, SUNRISE, SUNSET);
+  if (!sun) return;
+  // low on the horizon the sun turns orange and swells, and the glow around it widens
+  const col = hexMix('#fff6d0', '#ff8a3c', Math.pow(sun.low, 1.6));
+  const r = 24 + 12 * sun.low;
+  const glow = g.createRadialGradient(sun.x, sun.y, r * 0.6, sun.x, sun.y, r * 5);
+  glow.addColorStop(0, col + 'aa'); glow.addColorStop(1, col + '00');
+  g.fillStyle = glow; g.fillRect(sun.x - r * 5, sun.y - r * 5, r * 10, r * 10);
+  circle(g, sun.x, sun.y, r); g.fillStyle = col; g.fill();
+}
+// Dusk over the distant skyline and towers, then the stars and the moon on the dark sky.
+function drawDusk(g, hour) {
+  const c = skyAt(hour);
+  if (c.dark > 0) { g.fillStyle = `rgba(24,30,56,${c.dark})`; g.fillRect(0, 0, W, ROAD_Y); }
+  const night = clamp((c.dark - 0.3) / 0.2, 0, 1);
+  if (night <= 0) return;
+  g.save();
+  g.beginPath(); g.rect(0, 0, W, ROAD_Y); g.clip();
+  g.fillStyle = '#f4f1e6';
+  for (const [x, y, r, ph] of STARS) { g.globalAlpha = night * (0.55 + 0.45 * Math.sin(V.t * 1.5 + ph)); g.fillRect(x, y, r, r); }
+  g.globalAlpha = night;
+  const moon = skyBody((hour + 12) % 24, SUNRISE, SUNSET);
+  if (moon) {
+    circle(g, moon.x, moon.y, 17); g.fillStyle = '#f2efe0'; g.fill();
+    circle(g, moon.x + 7, moon.y - 3, 15); g.fillStyle = hexMix(hexMix(c.top, c.bottom, moon.y / ROAD_Y), '#181e38', c.dark); g.fill();
+  }
+  g.restore();
+}
+const STARS = (() => { const r = seeded(7); return Array.from({ length: 46 }, () => [r() * W, r() * (ROAD_Y - 90), 1 + r() * 1.6, r() * 6]); })();
+
 function render() {
   const g = ctx;
   g.setTransform(1, 0, 0, 1, 0, 0);
@@ -3025,7 +3092,10 @@ function render() {
   g.setTransform(V.k, 0, 0, V.k, 0, 0);
   const sh = reduceMotion ? Math.min(V.shake, 1.5) : V.shake;
   if (sh > 0.05) g.translate(rand(-sh, sh), rand(-sh, sh));
+  const hour = hourOfDay(S.elapsed, ERA, S.dayStartHour);
+  drawSky(g, hour);
   g.drawImage(bgLayer, 0, 0, W, H);
+  drawDusk(g, hour);
   for (const o of vessels(false)) drawShip(g, o.sh, o.lat);
   drawWater(g);
   drawBridge(g, V.bridgeShown);
@@ -3058,7 +3128,7 @@ function render() {
 const $ = (id) => document.getElementById(id);
 const el = {
   body: document.body,
-  clock: $('clock'), digits: [...document.querySelectorAll('#clock .d')],
+  clock: $('clock'), daytimeT: $('daytimeT'), digits: [...document.querySelectorAll('#clock .d')],
   panel: $('panel'), endlessTag: $('endlessTag'),
   tmeter: $('tmeter'), tfill: document.querySelector('#tmeter .fill'), shipsN: $('shipsN'),
   shiplogTimes: $('shiplogTimes'),
@@ -3112,7 +3182,7 @@ function tornEdges(node, amp, step) {
   node.style.clipPath = poly;
   node.style.webkitClipPath = poly;
 }
-document.querySelectorAll('.sign .paper, #tmeter .paper, #clock .paper').forEach((n) => tornEdges(n, 4, 5));
+document.querySelectorAll('.sign .paper, #tmeter .paper, #clock .paper, #daytime .paper').forEach((n) => tornEdges(n, 4, 5));
 document.querySelectorAll('.card .paper').forEach((n) => tornEdges(n, 7, 3));
 document.querySelectorAll('.stamp').forEach((n) => tornEdges(n, 3, 6));
 
@@ -3253,6 +3323,10 @@ function updateHud() {
     V.lastSecond = secs;
     el.clock.classList.toggle('urgent', !S.continuing && S.phase !== 'title' && secs <= 10);
   }
+  // time of day
+  const hr = hourOfDay(S.elapsed, ERA, S.dayStartHour);
+  const hm = String(Math.floor(hr)).padStart(2, '0') + ':' + String(Math.floor((hr % 1) * 60)).padStart(2, '0');
+  if (el.daytimeT.textContent !== hm) el.daytimeT.textContent = hm;
   // traffic meter
   el.tfill.style.width = `${(S.traffic * 100).toFixed(1)}%`;
   el.tmeter.classList.toggle('hot', S.traffic > CONFIG.trafficWarn);
