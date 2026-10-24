@@ -1680,30 +1680,29 @@ function vault(g, x, y, w, h) {
   g.fillStyle = '#dcdbd6'; g.fillRect(x + 1, y + h - 5, w - 2, 5);
 }
 
+// The City as seen looking west from Tower Bridge: St Paul's, the Monument, Wren's steeples and
+// the Tower of London in both eras; the Shard, Gherkin and the rest of today's towers in Modern,
+// dockside cranes and chimneys in Victorian. (Kept low around x 410-480, where the sun sets.)
+const SKY_FAR = '#e4e3de', SKY_MID = '#e1e0db', SKY_NEAR = '#d9d8d3', SKY_DETAIL = '#cdccc7';
 function drawSkyline(g) {
   const base = ROAD_Y;
-  // distant landmarks
-  g.fillStyle = '#e1e0db';
-  g.fillRect(262, base - 72, 76, 72);
-  g.fillRect(276, base - 106, 48, 36);
-  g.beginPath(); g.ellipse(300, base - 106, 28, 32, 0, Math.PI, TAU); g.fill();
-  g.fillRect(295, base - 152, 10, 18); g.fillRect(299, base - 163, 2, 12); g.fillRect(296, base - 159, 8, 2);
+  g.lineCap = 'butt';
+  // the tallest, most distant things first
   if (MODERN) {
-    // the Shard, the Gherkin and the Walkie-Talkie on today's skyline
-    g.fillStyle = '#dddcd7';
-    g.beginPath(); g.moveTo(534, base); g.lineTo(563, base - 296); g.lineTo(569, base - 290); g.lineTo(600, base); g.closePath(); g.fill();
-    g.beginPath(); g.moveTo(742, base); g.bezierCurveTo(730, base - 96, 744, base - 152, 760, base - 164); g.bezierCurveTo(776, base - 152, 790, base - 96, 778, base); g.closePath(); g.fill();
-    g.beginPath(); g.moveTo(842, base); g.lineTo(838, base - 118); g.quadraticCurveTo(860, base - 140, 886, base - 128); g.lineTo(878, base); g.closePath(); g.fill();
-    g.fillStyle = '#e1e0db';
+    drawShard(g, 540, base); drawTower42(g, 200, base);
+    drawCheesegrater(g, 668, base); drawGherkin(g, 728, base); drawWalkieTalkie(g, 790, base);
+  } else {
+    drawChimney(g, 22, base, 124); drawChimney(g, 138, base, 104); drawChimney(g, 492, base, 96);
+    drawSteeple(g, 566, base, 158); drawSteeple(g, 78, base, 150);
   }
-  spire(g, 560, base, 158); spire(g, 176, base, 124);
-  g.fillRect(616, base - 124, 9, 124); g.fillRect(612, base - 128, 17, 5);
-  g.beginPath(); g.ellipse(620.5, base - 132, 5, 6, 0, 0, TAU); g.fill();
-  // warehouses and chimneys
+  drawStPauls(g, 300, base);
+  drawMonument(g, MODERN ? 612 : 650, base);
+  if (!MODERN) { drawMasts(g, 700, base); drawMasts(g, 726, base, 0.8); }
+  // warehouses and chimneys along the wharves
   const r = seeded(11);
   let x = -10;
-  while (x < 990) {
-    const w = 34 + r() * 58, h = 22 + r() * 64;
+  while (x < 815) {
+    const w = 34 + r() * 58, h = 22 + r() * 54;
     g.fillStyle = r() < 0.5 ? '#d9d8d3' : '#d5d4cf';
     g.fillRect(x, base - h, w, h);
     const roof = r();
@@ -1714,10 +1713,162 @@ function drawSkyline(g) {
     }
     x += w - 2 + r() * 6;
   }
+  if (MODERN) drawTowerOfLondon(g, 118, base, 130, 36);
+  else { drawCrane(g, 215, base, -1); drawTowerOfLondon(g, 772, base, 52, 40); }
 }
-function spire(g, x, base, h) {
-  g.fillRect(x - 9, base - h * 0.55, 18, h * 0.55);
-  g.beginPath(); g.moveTo(x - 9, base - h * 0.55); g.lineTo(x, base - h); g.lineTo(x + 9, base - h * 0.55); g.fill();
+
+function drawStPauls(g, x, base) {
+  g.fillStyle = SKY_MID;
+  g.fillRect(x - 64, base - 52, 128, 52);             // nave and transepts
+  g.fillRect(x - 58, base - 58, 116, 6);              // balustrade
+  g.fillRect(x - 31, base - 84, 62, 34);              // the drum
+  g.fillRect(x - 25, base - 94, 50, 11);              // attic stage
+  g.beginPath(); g.ellipse(x, base - 94, 25, 40, 0, Math.PI, TAU); g.fill();   // the dome
+  g.fillRect(x - 6, base - 152, 12, 20);              // lantern
+  tri(g, x - 7.5, base - 152, x + 7.5, base - 152, x, base - 162);
+  circle(g, x, base - 165, 3); g.fill();              // ball and cross
+  g.fillRect(x - 0.8, base - 178, 1.6, 12); g.fillRect(x - 4, base - 175, 8, 1.6);
+  for (const sx of [-1, 1]) {                         // the two western towers
+    const tx = x + sx * 46;
+    g.fillStyle = SKY_MID;
+    g.fillRect(tx - 10, base - 94, 20, 44); g.fillRect(tx - 7, base - 108, 14, 15);
+    g.beginPath(); g.ellipse(tx, base - 108, 7, 10, 0, Math.PI, TAU); g.fill();
+    g.fillRect(tx - 0.7, base - 126, 1.4, 8);
+  }
+  g.strokeStyle = SKY_DETAIL; g.lineWidth = 1;
+  for (let i = -26; i <= 26; i += 5) line(g, x + i, base - 82, x + i, base - 52);        // colonnade
+  for (const k of [-16, -8, 0, 8, 16]) {                                                  // ribs of the dome
+    g.beginPath(); g.moveTo(x + k, base - 94); g.quadraticCurveTo(x + k * 0.9, base - 128, x + k * 0.15, base - 133); g.stroke();
+  }
+  for (let i = -60; i <= 60; i += 8) line(g, x + i, base - 42, x + i, base - 14);          // portico below
+  g.fillStyle = SKY_MID;
+}
+
+// The Monument to the Great Fire: a fluted column with a balcony and a flaming urn.
+function drawMonument(g, x, base) {
+  g.fillStyle = SKY_MID;
+  g.fillRect(x - 13, base - 32, 26, 32);
+  g.beginPath(); g.moveTo(x - 7, base - 32); g.lineTo(x - 5.5, base - 124); g.lineTo(x + 5.5, base - 124); g.lineTo(x + 7, base - 32); g.closePath(); g.fill();
+  g.fillRect(x - 9, base - 128, 18, 4);               // balcony
+  g.fillRect(x - 4.5, base - 144, 9, 16);             // the drum above it
+  g.beginPath(); g.ellipse(x, base - 146, 6, 4, 0, Math.PI, TAU); g.fill();
+  g.beginPath(); g.moveTo(x - 3.5, base - 147); g.quadraticCurveTo(x - 6, base - 160, x, base - 172);
+  g.quadraticCurveTo(x + 6, base - 160, x + 3.5, base - 147); g.fill();                     // the gilded flame
+  g.strokeStyle = SKY_DETAIL; g.lineWidth = 0.8;
+  for (const d of [-3, 0, 3]) line(g, x + d, base - 38, x + d * 0.8, base - 122);
+}
+
+// A Wren church steeple: a square tower, then tier on tier of ever smaller stages up to a needle.
+function drawSteeple(g, x, base, h) {
+  g.fillStyle = SKY_MID;
+  g.fillRect(x - 12, base - h * 0.5, 24, h * 0.5);
+  g.fillRect(x - 10, base - h * 0.66, 20, h * 0.16);
+  g.fillRect(x - 7.5, base - h * 0.78, 15, h * 0.12);
+  g.fillRect(x - 5.5, base - h * 0.86, 11, h * 0.08);
+  g.beginPath(); g.moveTo(x - 4, base - h * 0.86); g.lineTo(x, base - h); g.lineTo(x + 4, base - h * 0.86); g.fill();
+  g.fillRect(x - 0.7, base - h - 9, 1.4, 9);
+  g.fillStyle = SKY_DETAIL;
+  for (const d of [-5, 1]) g.fillRect(x + d, base - h * 0.45, 4, h * 0.14);          // belfry openings
+  g.fillRect(x - 1, base - h * 0.64, 2, h * 0.1);
+  g.fillStyle = SKY_MID;
+}
+
+// The White Tower with its four corner turrets, inside the curtain wall of the Tower of London.
+function drawTowerOfLondon(g, x, base, wallL, wallR) {
+  g.fillStyle = SKY_MID;
+  g.fillRect(x - 36 - wallL, base - 26, wallL, 26);   // crenellated curtain wall, with round towers
+  for (let i = x - 36 - wallL; i < x - 36; i += 9) g.fillRect(i, base - 32, 5, 6);
+  g.fillRect(x + 36, base - 26, wallR, 26);
+  for (let i = x + 36; i < x + 36 + wallR; i += 9) g.fillRect(i, base - 32, 5, 6);
+  for (let wx = x - 36 - 16; wx > x - 36 - wallL + 8; wx -= 38) { g.fillRect(wx - 9, base - 46, 18, 46); g.beginPath(); g.ellipse(wx, base - 46, 9, 8, 0, Math.PI, TAU); g.fill(); }
+  g.fillRect(x - 36, base - 66, 72, 66);              // the keep
+  for (const sx of [-1, 1]) {                         // the four corner turrets (two seen, two behind)
+    const tx = x + sx * 33;
+    g.fillRect(tx - 7, base - 90, 14, 26);
+    g.beginPath(); g.ellipse(tx, base - 90, 8, 9, 0, Math.PI, TAU); g.fill();
+    g.fillRect(tx - 0.7, base - 106, 1.4, 8);
+    const bx = x + sx * 11;
+    g.fillRect(bx - 6, base - 84, 12, 20);
+    g.beginPath(); g.ellipse(bx, base - 84, 7, 8, 0, Math.PI, TAU); g.fill();
+  }
+  g.fillStyle = SKY_DETAIL;
+  for (const wx of [-24, -8, 8, 24]) for (const wy of [-54, -36, -18]) { g.fillRect(x + wx - 2, base + wy, 4, 8); }
+  g.fillStyle = SKY_MID;
+}
+
+function drawChimney(g, x, base, h) {
+  g.fillStyle = SKY_MID;
+  g.beginPath(); g.moveTo(x - 7, base); g.lineTo(x - 4.5, base - h); g.lineTo(x + 4.5, base - h); g.lineTo(x + 7, base); g.closePath(); g.fill();
+  g.fillRect(x - 6, base - h - 3, 12, 4);
+  g.fillStyle = 'rgba(214,213,208,0.7)';              // a drift of coal smoke
+  for (let i = 0; i < 4; i++) { g.beginPath(); g.ellipse(x + 10 + i * 17, base - h - 8 - i * 3, 14 + i * 4, 7 + i * 1.5, 0, 0, TAU); g.fill(); }
+  g.fillStyle = SKY_MID;
+}
+
+// Masts and yards of sailing ships moored in the Pool of London.
+function drawMasts(g, x, base, sc = 1) {
+  g.strokeStyle = SKY_DETAIL; g.lineWidth = 1.6;
+  for (const d of [-14, 0, 14]) {
+    const hh = (d === 0 ? 112 : 96) * sc;
+    line(g, x + d, base - 6, x + d, base - hh);
+    for (const [yy, w] of [[0.55, 9], [0.7, 7], [0.85, 5]]) line(g, x + d - w * sc, base - hh * yy, x + d + w * sc, base - hh * yy);
+  }
+  line(g, x - 26, base - 14, x + 26, base - 14);
+}
+// A quayside hydraulic crane, the A-frame and jib.
+function drawCrane(g, x, base, dir = 1) {
+  g.strokeStyle = '#cdccc7'; g.lineWidth = 2.4;
+  line(g, x, base - 4, x, base - 64); line(g, x - 8, base - 4, x, base - 64); line(g, x + 8, base - 4, x, base - 64);
+  line(g, x - 6 * dir, base - 60, x + 40 * dir, base - 80); line(g, x + 40 * dir, base - 80, x + 40 * dir, base - 52);
+  g.lineWidth = 1; line(g, x, base - 64, x - 22 * dir, base - 50);
+}
+
+// ---- Modern: the glass towers ----
+function drawShard(g, x, base) {
+  g.fillStyle = '#e0dfda';
+  g.beginPath(); g.moveTo(x - 33, base); g.lineTo(x - 5, base - 278); g.lineTo(x - 2, base - 304); g.lineTo(x + 1, base - 282);
+  g.lineTo(x + 4, base - 298); g.lineTo(x + 7, base - 276); g.lineTo(x + 34, base); g.closePath(); g.fill();
+  g.strokeStyle = SKY_DETAIL; g.lineWidth = 0.9;
+  for (let t = 0.1; t < 0.93; t += 0.075) {          // the glass fins at each floor
+    const yy = base - 278 * t, w = lerp(32, 7, t);
+    line(g, x - w, yy, x + w, yy);
+  }
+  line(g, x - 1, base, x, base - 280);
+}
+function drawGherkin(g, x, base) {
+  const path = () => {
+    g.beginPath(); g.moveTo(x - 17, base);
+    g.bezierCurveTo(x - 17, base - 40, x - 28, base - 78, x - 24, base - 112);
+    g.bezierCurveTo(x - 20, base - 146, x - 8, base - 156, x, base - 168);
+    g.bezierCurveTo(x + 8, base - 156, x + 20, base - 146, x + 24, base - 112);
+    g.bezierCurveTo(x + 28, base - 78, x + 17, base - 40, x + 17, base); g.closePath();
+  };
+  path(); g.fillStyle = '#e0dfda'; g.fill();
+  g.save(); path(); g.clip();                          // the diagonal lattice of the skin
+  g.strokeStyle = SKY_DETAIL; g.lineWidth = 0.9;
+  for (let i = -60; i < 60; i += 9) { line(g, x + i, base, x + i + 60, base - 170); line(g, x + i + 60, base, x + i, base - 170); }
+  g.restore();
+  g.fillStyle = SKY_DETAIL; circle(g, x, base - 168, 2.2); g.fill();
+}
+function drawWalkieTalkie(g, x, base) {
+  g.fillStyle = '#e0dfda';
+  g.beginPath(); g.moveTo(x - 14, base); g.lineTo(x - 24, base - 96); g.quadraticCurveTo(x - 24, base - 112, x - 12, base - 113);
+  g.lineTo(x + 18, base - 113); g.quadraticCurveTo(x + 27, base - 112, x + 25, base - 96); g.lineTo(x + 15, base); g.closePath(); g.fill();
+  g.strokeStyle = SKY_DETAIL; g.lineWidth = 0.9;
+  for (let yy = 12; yy < 104; yy += 8) { const w = lerp(14, 24, yy / 100); line(g, x - w, base - yy, x + w * 1.05, base - yy); }
+}
+function drawCheesegrater(g, x, base) {
+  g.fillStyle = '#e0dfda';
+  g.beginPath(); g.moveTo(x - 20, base); g.lineTo(x - 20, base - 96); g.lineTo(x + 18, base - 208); g.lineTo(x + 18, base); g.closePath(); g.fill();
+  g.strokeStyle = SKY_DETAIL; g.lineWidth = 0.9;       // the steel bracing
+  for (let i = 0; i < 4; i++) { line(g, x - 20, base - i * 24, x + 18, base - 24 - i * 24); line(g, x + 18, base - i * 24, x - 20, base - 24 - i * 24); }
+}
+function drawTower42(g, x, base) {
+  g.fillStyle = '#e0dfda';
+  g.fillRect(x - 17, base - 96, 34, 96); g.fillRect(x - 13, base - 132, 26, 38); g.fillRect(x - 9, base - 154, 18, 24);
+  g.fillRect(x - 0.7, base - 170, 1.4, 16);
+  g.strokeStyle = SKY_DETAIL; g.lineWidth = 0.9;
+  for (let yy = 8; yy < 150; yy += 9) line(g, x - (yy < 96 ? 17 : yy < 132 ? 13 : 9), base - yy, x + (yy < 96 ? 17 : yy < 132 ? 13 : 9), base - yy);
 }
 
 function drawTowerBg(g) {
