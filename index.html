@@ -120,7 +120,7 @@ button:focus-visible, #lever:focus-visible { outline: 3px solid var(--blue); out
 #daytime.digital .lcd { display: block; }
 
 /* ---------- busy-hours graph ---------- */
-#rushgraph { position: absolute; left: 362px; top: 14px; width: 234px; height: 78px; z-index: 4; filter: drop-shadow(0 3px 4px rgba(0,0,0,.3)); }
+#rushgraph { position: absolute; left: 362px; top: 14px; width: 234px; height: 92px; z-index: 4; filter: drop-shadow(0 3px 4px rgba(0,0,0,.3)); }
 #rushgraph .paper { height: 100%; }
 #rushgraph svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 #rushgraph text { font-family: var(--stencil); fill: #4a4036; }
@@ -431,7 +431,7 @@ body.modern #btnCoal .l { font-size: 70px; }
       <div class="lcd"><span id="lcdH">07</span><i id="lcdC">:</i><span id="lcdM">00</span></div>
     </div></div>
 
-    <div id="rushgraph" aria-hidden="true"><div class="paper"></div><svg viewBox="0 0 240 78" id="rushSvg"></svg></div>
+    <div id="rushgraph" aria-hidden="true"><div class="paper"></div><svg viewBox="0 0 240 92" id="rushSvg"></svg></div>
 
     <div id="tmeter" aria-hidden="true"><div class="paper">
       <div class="lbl">TRAFFIC</div>
@@ -880,19 +880,41 @@ const SHIP_KINDS = {
 // so 2 minutes of play is about 3 real hours in 1894 and about a real day today — Tower
 // Bridge lifted roughly 6,194 times in 1894 and lifts about 800 times a year now.
 const REAL_LIFTS_PER_YEAR = { victorian: 6194, modern: 800 };
-function hourOfDay(t, era, startHour) {
+function absHours(t, era, startHour) {
   const realLiftInterval = 365 * 24 * 3600 / REAL_LIFTS_PER_YEAR[era];
   const avgGameShipGap = (CONFIG.shipIntervalMin + CONFIG.shipIntervalMax) / 2;
   const gameSecPerHour = 3600 / (realLiftInterval / avgGameShipGap);
-  return (startHour + t / gameSecPerHour) % 24;
+  return startHour + t / gameSecPerHour;
+}
+function hourOfDay(t, era, startHour) { return absHours(t, era, startHour) % 24; }
+// The calendar rides on the same clock: every 24 hours of it is the next date. A date is a
+// day number (days since 1 Jan 1970), so the weekday follows from it (1 Jan 1970 was a Thursday).
+const DAY_NAMES = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+const MONTH_NAMES = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+const dayNumberAt = (t, era, startHour, startDay = 0) => startDay + Math.floor(absHours(t, era, startHour) / 24);
+const weekdayOf = (dayNumber) => (((dayNumber + 4) % 7) + 7) % 7;       // 0 = Sunday
+const dayKindOf = (dayNumber) => { const w = weekdayOf(dayNumber); return w === 0 ? 'sun' : w === 6 ? 'sat' : 'week'; };
+function dateText(dayNumber) {
+  const d = new Date(dayNumber * 86400000);
+  return `${DAY_NAMES[d.getUTCDay()]} ${d.getUTCDate()} ${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+// Any day of the first half-year the bridge was open (from 30 June 1894), or of the year today.
+function randomStartDay(era) {
+  const first = era === 'modern' ? Date.UTC(2026, 0, 1) : Date.UTC(1894, 6, 1);
+  return Math.floor(first / 86400000) + Math.floor(rand(0, era === 'modern' ? 365 : 184));
 }
 // Busiest at the two daily commuting peaks, quietest overnight; a shared shape (only the
 // real daily totals it's applied to differ between the eras) that averages to roughly 1
 // across a day, so it nudges the pace up and down without changing the overall average.
-function rushMul(hour) {
+// At the weekend the commuting peaks go: Saturday keeps a small morning rush and a busy
+// afternoon of leisure traffic, Sunday is calm with one broad midday swell.
+function rushMul(hour, dayKind = 'week') {
   const bump = (h, c, w) => Math.exp(-((h - c) * (h - c)) / (2 * w * w));
   const overnight = hour < 5 || hour > 23 ? 0.5 : hour < 7 ? 0.7 : 1;
-  return overnight * (0.75 + 0.3 * bump(hour, 8.5, 1.6) + 0.35 * bump(hour, 17.5, 1.8));
+  const day = dayKind === 'sun' ? 0.7 + 0.3 * bump(hour, 14, 3.2)
+    : dayKind === 'sat' ? 0.72 + 0.15 * bump(hour, 8.5, 1.5) + 0.3 * bump(hour, 14, 3)
+    : 0.75 + 0.3 * bump(hour, 8.5, 1.6) + 0.35 * bump(hour, 17.5, 1.8);
+  return overnight * day;
 }
 function pickShipKind(allowUrgent, era = 'victorian') {
   const names = Object.keys(SHIP_KINDS).filter((n) => SHIP_KINDS[n].weight > 0 && (allowUrgent || !SHIP_KINDS[n].urgent) &&
@@ -906,7 +928,7 @@ function pickShipKind(allowUrgent, era = 'victorian') {
 // The elapsed-time (seconds) and kind of each ship to appear this game. The first ship
 // is always an ordinary one, and the second is never the urgent kind, so the player
 // meets the basic mechanic before facing a tight deadline.
-function generateShipSchedule(era, startHour) {
+function generateShipSchedule(era, startHour, startDay) {
   const C = CONFIG;
   const sched = [];
   let t = rand(C.firstShipMin, C.firstShipMax);
@@ -916,14 +938,14 @@ function generateShipSchedule(era, startHour) {
     if (C.gameDuration - t <= approachTime + 1) break;
     const kind = sched.length === 0 ? 'tall' : pickShipKind(sched.length >= 2, era);
     sched.push({ t, kind });
-    t += shipGap(kind, lerp(1, C.shipIntervalRamp, k), t, era, startHour);
+    t += shipGap(kind, lerp(1, C.shipIntervalRamp, k), t, era, startHour, startDay);
   }
   return sched;
 }
-function shipGap(kind, mul, t = 0, era = 'victorian', startHour = 7) {
+function shipGap(kind, mul, t = 0, era = 'victorian', startHour = 7, startDay = 0) {
   // Clamped so the daily rhythm nudges the pace rather than ever producing an
   // unreasonably short or long gap between ships.
-  const rush = clamp(rushMul(hourOfDay(t, era, startHour)), 0.8, 1.25);
+  const rush = clamp(rushMul(hourOfDay(t, era, startHour), dayKindOf(dayNumberAt(t, era, startHour, startDay))), 0.8, 1.25);
   return rand(CONFIG.shipIntervalMin, CONFIG.shipIntervalMax) * mul / rush * (SHIP_KINDS[kind].needsLift ? 1 : CONFIG.smallBoatGapMul);
 }
 
@@ -932,9 +954,10 @@ function createState(era = 'victorian') {
   // small hours, sometimes right in a commuting rush, sometimes a quiet midday — a
   // different day each time, not the same rhythm on every game.
   const dayStartHour = rand(0, 24);
+  const dayStartDay = randomStartDay(era);
   return {
     phase: 'title',            // title | playing | paused | failing | over | won
-    era, dayStartHour, elapsed: 0, continuing: false,
+    era, dayStartHour, dayStartDay, elapsed: 0, continuing: false,
     motorsOn: false, motorSpin: 0, motorHeat: CONFIG.motorHeatStart, motorTripT: 0, motorTrips: 0,
     pressure: CONFIG.pressureStart, coalBurns: [], overTime: 0, idealTime: 0,
     oil: CONFIG.oilStart, oilTank: rand(CONFIG.oilTankMin, CONFIG.oilTankMax), enginesOut: null,
@@ -944,7 +967,7 @@ function createState(era = 'victorian') {
     bridge: 0, bridgeFar: 0, leverUp: false, bridgeMoving: 0, stalled: false,
     gatesClosed: false, deckClearIn: 0, blockHint: null, blockHintT: 0,
     ship: null, shipCount: 0, shipsPassed: 0, grandPassed: 0, urgentPassed: 0, passedAt: -99,
-shipSchedule: generateShipSchedule(era, dayStartHour), nextShipIdx: 0,
+shipSchedule: generateShipSchedule(era, dayStartHour, dayStartDay), nextShipIdx: 0,
     traffic: 0, peakTraffic: 0, trafficSum: 0,
     careTime: 0, faultPenalties: 0, upSince: null, shipMargins: [],
     failReason: null, failTimer: 0, failNote: null,
@@ -1281,7 +1304,7 @@ function extendShipSchedule(S) {
   const C = CONFIG;
   while (S.shipSchedule.length - S.nextShipIdx < 2) {
     const prev = S.shipSchedule[S.shipSchedule.length - 1];
-    const t = prev ? Math.max(prev.t + shipGap(prev.kind, C.shipIntervalRamp, prev.t, S.era, S.dayStartHour), S.elapsed) : S.elapsed + shipGap('tall', C.shipIntervalRamp, S.elapsed, S.era, S.dayStartHour);
+    const t = prev ? Math.max(prev.t + shipGap(prev.kind, C.shipIntervalRamp, prev.t, S.era, S.dayStartHour, S.dayStartDay), S.elapsed) : S.elapsed + shipGap('tall', C.shipIntervalRamp, S.elapsed, S.era, S.dayStartHour, S.dayStartDay);
     S.shipSchedule.push({ t, kind: pickShipKind(true, S.era) });
   }
 }
@@ -2515,13 +2538,16 @@ const PED_RATE_MUL = DAILY.peds / 60000, VEH_RATE_MUL = DAILY.vehicles / 8000;
 // modern's quietest hour was still nearly as dense as Victorian's rush hour — the road
 // never looked quiet. This only affects how many sprites are drawn, never S.traffic or
 // anything the game is won or lost on.
-function roadRushMul(hour) {
+function roadRushMul(hour, dayKind = 'week') {
   const bump = (h, c, w) => Math.exp(-((h - c) * (h - c)) / (2 * w * w));
   const overnight = hour < 5 || hour > 23 ? 0.12 : hour < 7 ? 0.3 : 1;
-  return overnight * (0.35 + 0.5 * bump(hour, 8.5, 1.6) + 0.55 * bump(hour, 17.5, 1.8));
+  const day = dayKind === 'sun' ? 0.24 + 0.52 * bump(hour, 14, 3.2) + 0.08 * bump(hour, 20, 2)
+    : dayKind === 'sat' ? 0.28 + 0.18 * bump(hour, 9, 1.5) + 0.48 * bump(hour, 13.5, 3) + 0.15 * bump(hour, 21, 2)
+    : 0.35 + 0.5 * bump(hour, 8.5, 1.6) + 0.55 * bump(hour, 17.5, 1.8);
+  return overnight * day;
 }
-function roadPace(hour, [lo, hi], rateMul) {
-  const mul = clamp(rateMul * roadRushMul(hour) * DWELL_COMP, 0.02, 90);
+function roadPace(hour, [lo, hi], rateMul, dayKind) {
+  const mul = clamp(rateMul * roadRushMul(hour, dayKind) * DWELL_COMP, 0.02, 90);
   return [lo / mul, hi / mul];
 }
 const PX_PER_M = (GEOM.farPierFace - 1130) / 61;
@@ -2614,6 +2640,7 @@ function updateTraffic(dt) {
   }
   const closed = roadClosed();
   const hour = hourOfDay(S.elapsed, ERA, S.dayStartHour);
+  const dayKind = dayKindOf(dayNumberAt(S.elapsed, ERA, S.dayStartHour, S.dayStartDay));
   V.carT -= dt; V.pedT -= dt;
   // Arrivals keep coming at the same real pace whether the road is open or closed — closed,
   // they just pile up behind STOP_X instead of crossing, so a jam actually builds up in
@@ -2621,13 +2648,13 @@ function updateTraffic(dt) {
   // governs the *game's* traffic-jam ending and how fast a backlog releases once the road
   // reopens; it's just no longer what throttles how many vehicles are visibly stopped).
   if (V.carT <= 0) {
-    const next = rand(...roadPace(hour, [0.5, 0.8], VEH_RATE_MUL));
+    const next = rand(...roadPace(hour, [0.5, 0.8], VEH_RATE_MUL, dayKind));
     const queued = V.cars.filter((v) => v.x + v.len <= STOP_X + 1).length;
     const spawn = !closed || queued < CONFIG.trafficQueueCarsMax;
     if (spawn && entranceClear(V.cars, 14)) { V.cars.push(makeCar()); V.carT = next; } else V.carT = 0.05;
   }
   if (V.pedT <= 0) {
-    const next = rand(...roadPace(hour, [0.08, 0.2], PED_RATE_MUL));
+    const next = rand(...roadPace(hour, [0.08, 0.2], PED_RATE_MUL, dayKind));
     const queued = V.peds.filter((v) => v.x + v.len <= STOP_X + 1).length;
     const spawn = !closed || queued < CONFIG.trafficQueuePedsMax;
     if (spawn && entranceClear(V.peds, 8)) { V.peds.push(makePed()); V.pedT = next; } else V.pedT = 0.1;
@@ -3178,42 +3205,57 @@ function buildLayers() {
 }
 
 // ---- busy hours: how crowded the river and the road get at each hour of the day ----
-const RUSH = { x0: 12, w: 216, y0: 26, h: 34 };
-const rushShips = (h) => clamp(rushMul(h), 0.8, 1.25);   // what the ship schedule really uses
-function buildRushGraph() {
+// Today's curves (they change shape at the weekend) against the weekday peak, so a quiet
+// weekend visibly sits lower; a marker follows the hour of the day, the date and the week
+// strip below follow the calendar.
+const RUSH = { x0: 12, w: 216, y0: 26, h: 30 };
+const rushShips = (h, kind) => clamp(rushMul(h, kind), 0.8, 1.25);   // what the ship schedule really uses
+let rushNow = null, rushLast = -1, rushMax = null;
+function buildRushGraph(dayNum) {
   const { x0, w, y0, h } = RUSH;
-  const pts = (fn) => { const v = []; for (let t = 0; t <= 24.001; t += 0.25) v.push([t, fn(t % 24)]); const m = Math.max(...v.map((p) => p[1])); return v.map(([t, y]) => [x0 + t / 24 * w, y0 + h * (1 - y / m)]); };
+  const kind = dayKindOf(dayNum), dow = weekdayOf(dayNum);
+  if (!rushMax) {
+    const mx = (fn) => Math.max(...Array.from({ length: 97 }, (_, i) => fn(i / 4 % 24, 'week')));
+    rushMax = { s: mx(rushShips), r: mx(roadRushMul) };
+  }
+  const pts = (fn, m) => { const v = []; for (let t = 0; t <= 24.001; t += 0.25) v.push([x0 + t / 24 * w, y0 + h * (1 - fn(t % 24, kind) / m)]); return v; };
   const path = (a) => a.map(([x, y], i) => (i ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1)).join('');
-  const ships = pts(rushShips), road = pts(roadRushMul);
+  const ships = pts(rushShips, rushMax.s), road = pts(roadRushMul, rushMax.r);
   let ticks = '';
   for (const t of [0, 6, 12, 18, 24]) {
     const x = x0 + t / 24 * w;
-    ticks += `<line x1="${x}" y1="${y0}" x2="${x}" y2="${y0 + h + 2}" stroke="#2b2825" stroke-opacity=".25" stroke-dasharray="2 2"/><text x="${x}" y="${y0 + h + 12}" font-size="9" text-anchor="middle">${String(t).padStart(2, '0')}</text>`;
+    ticks += `<line x1="${x}" y1="${y0}" x2="${x}" y2="${y0 + h + 2}" stroke="#2b2825" stroke-opacity=".25" stroke-dasharray="2 2"/><text x="${x}" y="${y0 + h + 11}" font-size="9" text-anchor="middle">${String(t).padStart(2, '0')}</text>`;
   }
+  let week = '';                                        // the week, Monday first, today picked out
+  const cw = w / 7;
+  [1, 2, 3, 4, 5, 6, 0].forEach((d, i) => {
+    const today = d === dow, weekend = d === 0 || d === 6;
+    week += `<rect x="${(x0 + i * cw + 1).toFixed(1)}" y="72" width="${(cw - 2).toFixed(1)}" height="14" rx="2" fill="${today ? '#2b2825' : weekend ? '#dccfa9' : '#f6f1e2'}" stroke="#2b2825" stroke-opacity="${today ? 1 : .45}" stroke-width=".9"/>` +
+      `<text x="${(x0 + (i + .5) * cw).toFixed(1)}" y="82" font-size="9.5" text-anchor="middle" style="fill:${today ? '#f6f1e2' : '#4a4036'}">${DAY_NAMES[d].slice(0, 2)}</text>`;
+  });
   el.rushSvg.innerHTML =
-    `<text x="12" y="16" font-size="11" letter-spacing=".8">BUSY HOURS</text>` +
-    `<line x1="108" y1="12" x2="122" y2="12" stroke="#2b2825" stroke-width="2.2"/><text x="126" y="16" font-size="10">SHIPS</text>` +
-    `<line x1="164" y1="12" x2="178" y2="12" stroke="#a3292a" stroke-width="2.2"/><text x="182" y="16" font-size="10">ROAD</text>` +
+    `<text x="12" y="16" font-size="11" letter-spacing=".6">${dateText(dayNum)}</text>` +
+    `<line x1="144" y1="12" x2="154" y2="12" stroke="#2b2825" stroke-width="2.2"/><text x="157" y="16" font-size="9">SHIPS</text>` +
+    `<line x1="192" y1="12" x2="202" y2="12" stroke="#a3292a" stroke-width="2.2"/><text x="205" y="16" font-size="9">ROAD</text>` +
     `<line x1="${x0}" y1="${y0 + h}" x2="${x0 + w}" y2="${y0 + h}" stroke="#2b2825" stroke-width="1.4"/>` + ticks +
     `<path d="${path(road)}L${x0 + w} ${y0 + h}L${x0} ${y0 + h}Z" fill="#a3292a" fill-opacity=".14"/>` +
     `<path d="${path(road)}" fill="none" stroke="#a3292a" stroke-width="1.8" stroke-linejoin="round"/>` +
-    `<path d="${path(ships)}" fill="none" stroke="#2b2825" stroke-width="1.8" stroke-linejoin="round"/>` +
+    `<path d="${path(ships)}" fill="none" stroke="#2b2825" stroke-width="1.8" stroke-linejoin="round"/>` + week +
     `<line id="rushNow" x1="0" y1="${y0 - 3}" x2="0" y2="${y0 + h + 2}" stroke="#2b2825" stroke-width="1.6"/>` +
     `<circle id="rushDotS" r="3" fill="#f6f1e2" stroke="#2b2825" stroke-width="1.6"/><circle id="rushDotR" r="3" fill="#f6f1e2" stroke="#a3292a" stroke-width="1.6"/>`;
-  rushNow = { line: $('rushNow'), s: $('rushDotS'), r: $('rushDotR') };
-  rushNow.maxS = Math.max(...Array.from({ length: 97 }, (_, i) => rushShips(i / 4 % 24)));
-  rushNow.maxR = Math.max(...Array.from({ length: 97 }, (_, i) => roadRushMul(i / 4 % 24)));
+  rushNow = { line: $('rushNow'), s: $('rushDotS'), r: $('rushDotR'), day: dayNum, kind };
+  rushLast = -1;
 }
-let rushNow = null, rushLast = -1;
-function moveRushNow(hr) {
-  if (!rushNow) { setupClockFace(); buildRushGraph(); }
+function moveRushNow(hr, dayNum) {
+  if (!rushNow) setupClockFace();
+  if (!rushNow || rushNow.day !== dayNum) buildRushGraph(dayNum);
   if (Math.abs(hr - rushLast) < 0.01) return;
   rushLast = hr;
   const { x0, w, y0, h } = RUSH;
   const x = x0 + hr / 24 * w, f = (v, m) => y0 + h * (1 - v / m);
   rushNow.line.setAttribute('x1', x); rushNow.line.setAttribute('x2', x);
-  rushNow.s.setAttribute('cx', x); rushNow.s.setAttribute('cy', f(rushShips(hr), rushNow.maxS));
-  rushNow.r.setAttribute('cx', x); rushNow.r.setAttribute('cy', f(roadRushMul(hr), rushNow.maxR));
+  rushNow.s.setAttribute('cx', x); rushNow.s.setAttribute('cy', f(rushShips(hr, rushNow.kind), rushMax.s));
+  rushNow.r.setAttribute('cx', x); rushNow.r.setAttribute('cy', f(roadRushMul(hr, rushNow.kind), rushMax.r));
 }
 // the clock face: tick marks for the analogue clock, and which of the two is shown
 function setupClockFace() {
@@ -3518,7 +3560,7 @@ function updateHud() {
     el.handH.setAttribute('transform', `rotate(${((hr % 12) * 30).toFixed(1)} 24 24)`);
     el.handM.setAttribute('transform', `rotate(${((hr % 1) * 360).toFixed(1)} 24 24)`);
   }
-  moveRushNow(hr);
+  moveRushNow(hr, dayNumberAt(S.elapsed, ERA, S.dayStartHour, S.dayStartDay));
   // traffic meter
   el.tfill.style.width = `${(S.traffic * 100).toFixed(1)}%`;
   el.tmeter.classList.toggle('hot', S.traffic > CONFIG.trafficWarn);
