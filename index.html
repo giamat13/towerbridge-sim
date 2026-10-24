@@ -3026,13 +3026,14 @@ function layout() {
   stage.style.visibility = 'visible';
 }
 
-// ---- the sky: a plain grey sky with a grey sun that crosses it and sets as the day goes by ----
-const SUNRISE = 6, SUNSET = 18.5;
-// The sun arcs across the sky and sinks behind the skyline and the road; null while it's night.
+// ---- the sky: a plain grey sky; we look out to the west, so all that's seen of the sun is it
+// sinking behind the skyline over station 2 in the late afternoon (it never crosses the sky) ----
+const SUN_FROM = 16, SUN_SET = 18.5;
+// The sun's position, or null while it's not in view.
 function sunAt(hour) {
-  const f = (hour - SUNRISE) / (SUNSET - SUNRISE);
+  const f = (hour - SUN_FROM) / (SUN_SET - SUN_FROM);
   if (f < 0 || f > 1) return null;
-  return { x: lerp(140, 1460, f), y: ROAD_Y + 34 - Math.sin(f * Math.PI) * (ROAD_Y - 80) };
+  return { x: lerp(470, 440, f), y: lerp(120, ROAD_Y + 34, f * f), a: clamp(f * 8, 0, 1) };  // fades in, then sinks faster and faster
 }
 function drawSky(g, hour) {
   const sky = g.createLinearGradient(0, 0, 0, ROAD_Y);
@@ -3040,7 +3041,9 @@ function drawSky(g, hour) {
   g.fillStyle = sky; g.fillRect(0, 0, W, ROAD_Y + 1);
   const sun = sunAt(hour);
   if (!sun) return;
+  g.globalAlpha = sun.a;
   circle(g, sun.x, sun.y, 30); g.fillStyle = '#c4c3be'; g.fill();
+  g.globalAlpha = 1;
 }
 
 function render() {
