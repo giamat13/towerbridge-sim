@@ -108,11 +108,22 @@ button:focus-visible, #lever:focus-visible { outline: 3px solid var(--blue); out
 .colon { color: #ecece8; font-size: 32px; line-height: 46px; padding: 0 1px; font-weight: 400; }
 #clock.urgent .d { color: #b3261e; }
 
-/* ---------- time of day ---------- */
-#daytime { position: absolute; left: 262px; top: 14px; width: 128px; height: 56px; z-index: 4; filter: drop-shadow(0 3px 4px rgba(0,0,0,.3)); }
-#daytime .paper { height: 100%; display: flex; align-items: center; justify-content: center; gap: 7px; padding: 0 10px; }
-#daytime .lbl { font-size: 13px; letter-spacing: .5px; line-height: 1; }
-#daytime b { font-size: 25px; font-weight: 400; font-variant-numeric: tabular-nums; }
+/* ---------- time of day: an analogue clock in 1894, a digital one today ---------- */
+#daytime { position: absolute; left: 260px; top: 14px; width: 94px; height: 56px; z-index: 4; filter: drop-shadow(0 3px 4px rgba(0,0,0,.3)); }
+#daytime .paper { height: 100%; display: flex; align-items: center; justify-content: center; }
+#daytime svg { width: 50px; height: 50px; display: block; }
+#daytime .lcd { display: none; padding: 5px 7px 4px; border-radius: 4px; background: #1d201c; box-shadow: inset 0 2px 4px #000, 0 1px 0 rgba(255,255,255,.5);
+  font: 700 22px/1 ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace; letter-spacing: 1px; color: #cfe3b4; text-shadow: 0 0 5px rgba(160,220,110,.55); }
+#daytime .lcd i { font-style: normal; transition: opacity .1s; }
+#daytime .lcd i.off { opacity: .15; }
+#daytime.digital svg { display: none; }
+#daytime.digital .lcd { display: block; }
+
+/* ---------- busy-hours graph ---------- */
+#rushgraph { position: absolute; left: 362px; top: 14px; width: 234px; height: 78px; z-index: 4; filter: drop-shadow(0 3px 4px rgba(0,0,0,.3)); }
+#rushgraph .paper { height: 100%; }
+#rushgraph svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#rushgraph text { font-family: var(--stencil); fill: #4a4036; }
 
 /* ---------- traffic meter ---------- */
 #tmeter { position: absolute; left: 604px; top: 14px; width: 356px; height: 56px; z-index: 4; filter: drop-shadow(0 3px 4px rgba(0,0,0,.3)); }
@@ -407,8 +418,20 @@ body.modern #btnCoal .l { font-size: 70px; }
     </div>
 
     <div id="daytime" aria-hidden="true"><div class="paper">
-      <div class="lbl">TIME</div><b id="daytimeT">07:00</b>
+      <svg viewBox="0 0 48 48">
+        <circle cx="24" cy="24" r="22" fill="#f6f1e2" stroke="#2b2825" stroke-width="2.2"/>
+        <g id="clockTicks" stroke="#2b2825" stroke-linecap="round"></g>
+        <g font-family="Georgia, serif" font-size="6.6" font-weight="700" fill="#2b2825" text-anchor="middle">
+          <text x="24" y="12.2">XII</text><text x="38.4" y="26.4">III</text><text x="24" y="40.8">VI</text><text x="9.6" y="26.4">IX</text>
+        </g>
+        <line id="handH" x1="24" y1="24" x2="24" y2="14.5" stroke="#2b2825" stroke-width="2.6" stroke-linecap="round"/>
+        <line id="handM" x1="24" y1="24" x2="24" y2="7" stroke="#2b2825" stroke-width="1.4" stroke-linecap="round"/>
+        <circle cx="24" cy="24" r="2" fill="#a3292a"/>
+      </svg>
+      <div class="lcd"><span id="lcdH">07</span><i id="lcdC">:</i><span id="lcdM">00</span></div>
     </div></div>
+
+    <div id="rushgraph" aria-hidden="true"><div class="paper"></div><svg viewBox="0 0 240 78" id="rushSvg"></svg></div>
 
     <div id="tmeter" aria-hidden="true"><div class="paper">
       <div class="lbl">TRAFFIC</div>
@@ -3154,6 +3177,55 @@ function buildLayers() {
   }
 }
 
+// ---- busy hours: how crowded the river and the road get at each hour of the day ----
+const RUSH = { x0: 12, w: 216, y0: 26, h: 34 };
+const rushShips = (h) => clamp(rushMul(h), 0.8, 1.25);   // what the ship schedule really uses
+function buildRushGraph() {
+  const { x0, w, y0, h } = RUSH;
+  const pts = (fn) => { const v = []; for (let t = 0; t <= 24.001; t += 0.25) v.push([t, fn(t % 24)]); const m = Math.max(...v.map((p) => p[1])); return v.map(([t, y]) => [x0 + t / 24 * w, y0 + h * (1 - y / m)]); };
+  const path = (a) => a.map(([x, y], i) => (i ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1)).join('');
+  const ships = pts(rushShips), road = pts(roadRushMul);
+  let ticks = '';
+  for (const t of [0, 6, 12, 18, 24]) {
+    const x = x0 + t / 24 * w;
+    ticks += `<line x1="${x}" y1="${y0}" x2="${x}" y2="${y0 + h + 2}" stroke="#2b2825" stroke-opacity=".25" stroke-dasharray="2 2"/><text x="${x}" y="${y0 + h + 12}" font-size="9" text-anchor="middle">${String(t).padStart(2, '0')}</text>`;
+  }
+  el.rushSvg.innerHTML =
+    `<text x="12" y="16" font-size="11" letter-spacing=".8">BUSY HOURS</text>` +
+    `<line x1="108" y1="12" x2="122" y2="12" stroke="#2b2825" stroke-width="2.2"/><text x="126" y="16" font-size="10">SHIPS</text>` +
+    `<line x1="164" y1="12" x2="178" y2="12" stroke="#a3292a" stroke-width="2.2"/><text x="182" y="16" font-size="10">ROAD</text>` +
+    `<line x1="${x0}" y1="${y0 + h}" x2="${x0 + w}" y2="${y0 + h}" stroke="#2b2825" stroke-width="1.4"/>` + ticks +
+    `<path d="${path(road)}L${x0 + w} ${y0 + h}L${x0} ${y0 + h}Z" fill="#a3292a" fill-opacity=".14"/>` +
+    `<path d="${path(road)}" fill="none" stroke="#a3292a" stroke-width="1.8" stroke-linejoin="round"/>` +
+    `<path d="${path(ships)}" fill="none" stroke="#2b2825" stroke-width="1.8" stroke-linejoin="round"/>` +
+    `<line id="rushNow" x1="0" y1="${y0 - 3}" x2="0" y2="${y0 + h + 2}" stroke="#2b2825" stroke-width="1.6"/>` +
+    `<circle id="rushDotS" r="3" fill="#f6f1e2" stroke="#2b2825" stroke-width="1.6"/><circle id="rushDotR" r="3" fill="#f6f1e2" stroke="#a3292a" stroke-width="1.6"/>`;
+  rushNow = { line: $('rushNow'), s: $('rushDotS'), r: $('rushDotR') };
+  rushNow.maxS = Math.max(...Array.from({ length: 97 }, (_, i) => rushShips(i / 4 % 24)));
+  rushNow.maxR = Math.max(...Array.from({ length: 97 }, (_, i) => roadRushMul(i / 4 % 24)));
+}
+let rushNow = null, rushLast = -1;
+function moveRushNow(hr) {
+  if (!rushNow) { setupClockFace(); buildRushGraph(); }
+  if (Math.abs(hr - rushLast) < 0.01) return;
+  rushLast = hr;
+  const { x0, w, y0, h } = RUSH;
+  const x = x0 + hr / 24 * w, f = (v, m) => y0 + h * (1 - v / m);
+  rushNow.line.setAttribute('x1', x); rushNow.line.setAttribute('x2', x);
+  rushNow.s.setAttribute('cx', x); rushNow.s.setAttribute('cy', f(rushShips(hr), rushNow.maxS));
+  rushNow.r.setAttribute('cx', x); rushNow.r.setAttribute('cy', f(roadRushMul(hr), rushNow.maxR));
+}
+// the clock face: tick marks for the analogue clock, and which of the two is shown
+function setupClockFace() {
+  let t = '';
+  for (let i = 0; i < 60; i++) {
+    const a = i * 6 * DEG, big = i % 5 === 0, r0 = big ? 19 : 20.6;
+    t += `<line x1="${(24 + Math.sin(a) * r0).toFixed(2)}" y1="${(24 - Math.cos(a) * r0).toFixed(2)}" x2="${(24 + Math.sin(a) * 21.4).toFixed(2)}" y2="${(24 - Math.cos(a) * 21.4).toFixed(2)}" stroke-width="${big ? 1.4 : 0.6}"/>`;
+  }
+  $('clockTicks').innerHTML = t;
+  el.daytime.classList.toggle('digital', MODERN);
+}
+
 const stage = document.getElementById('stage');
 const isPhone = () => (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) || Math.min(screen.width, screen.height) < 600;
 function checkOrientation() {
@@ -3239,7 +3311,8 @@ function render() {
 const $ = (id) => document.getElementById(id);
 const el = {
   body: document.body,
-  clock: $('clock'), daytimeT: $('daytimeT'), digits: [...document.querySelectorAll('#clock .d')],
+  clock: $('clock'), daytime: $('daytime'), handH: $('handH'), handM: $('handM'), lcdH: $('lcdH'), lcdM: $('lcdM'), lcdC: $('lcdC'),
+  rushSvg: $('rushSvg'), digits: [...document.querySelectorAll('#clock .d')],
   panel: $('panel'), endlessTag: $('endlessTag'),
   tmeter: $('tmeter'), tfill: document.querySelector('#tmeter .fill'), shipsN: $('shipsN'),
   shiplogTimes: $('shiplogTimes'),
@@ -3293,7 +3366,7 @@ function tornEdges(node, amp, step) {
   node.style.clipPath = poly;
   node.style.webkitClipPath = poly;
 }
-document.querySelectorAll('.sign .paper, #tmeter .paper, #clock .paper, #daytime .paper').forEach((n) => tornEdges(n, 4, 5));
+document.querySelectorAll('.sign .paper, #tmeter .paper, #clock .paper, #daytime .paper, #rushgraph .paper').forEach((n) => tornEdges(n, 4, 5));
 document.querySelectorAll('.card .paper').forEach((n) => tornEdges(n, 7, 3));
 document.querySelectorAll('.stamp').forEach((n) => tornEdges(n, 3, 6));
 
@@ -3434,10 +3507,18 @@ function updateHud() {
     V.lastSecond = secs;
     el.clock.classList.toggle('urgent', !S.continuing && S.phase !== 'title' && secs <= 10);
   }
-  // time of day
+  // time of day: the clock face (hands or digits), and the "now" marker on the busy-hours graph
   const hr = hourOfDay(S.elapsed, ERA, S.dayStartHour);
-  const hm = String(Math.floor(hr)).padStart(2, '0') + ':' + String(Math.floor((hr % 1) * 60)).padStart(2, '0');
-  if (el.daytimeT.textContent !== hm) el.daytimeT.textContent = hm;
+  if (MODERN) {
+    const hh = String(Math.floor(hr)).padStart(2, '0'), mm = String(Math.floor((hr % 1) * 60)).padStart(2, '0');
+    if (el.lcdH.textContent !== hh) el.lcdH.textContent = hh;
+    if (el.lcdM.textContent !== mm) el.lcdM.textContent = mm;
+    el.lcdC.classList.toggle('off', Math.floor(V.t * 2) % 2 === 1);
+  } else {
+    el.handH.setAttribute('transform', `rotate(${((hr % 12) * 30).toFixed(1)} 24 24)`);
+    el.handM.setAttribute('transform', `rotate(${((hr % 1) * 360).toFixed(1)} 24 24)`);
+  }
+  moveRushNow(hr);
   // traffic meter
   el.tfill.style.width = `${(S.traffic * 100).toFixed(1)}%`;
   el.tmeter.classList.toggle('hot', S.traffic > CONFIG.trafficWarn);
