@@ -1981,6 +1981,27 @@ function drawShip(g, sh, lat = 0) {
   g.scale(v.scale, v.scale);
   g.rotate(tilt);
   (BOW_DRAW[sh.kind] || BOW_DRAW.tall)(g);
+  if (isOmer(sh)) drawOmer(g, sh.kind);
+  g.restore();
+}
+// One vessel in a hundred carries the name עומר on its bow. Rolled once per vessel.
+const OMER_NAMED = new WeakMap();
+function isOmer(sh) {
+  if (!OMER_NAMED.has(sh)) OMER_NAMED.set(sh, Math.random() < 0.01);
+  return OMER_NAMED.get(sh);
+}
+// Where the name sits on each bow: [baseline y, font px, light text?]
+const OMER_SPOT = {
+  tall: [3, 11, true], grand: [3, 11, true], urgent: [-6, 9, true], barge: [-4, 9, true], steamer: [-4, 9, true],
+  cruise: [-10, 12, false], yacht: [-4, 9, false], rowboat: [0, 6, true], launch: [-2, 7, false],
+  clipper: [-7, 7, true], rib: [2.5, 7, true], skiff: [0, 6, true], small: [0, 6, true],
+};
+function drawOmer(g, kind) {
+  const [y, px, light] = OMER_SPOT[kind] || OMER_SPOT.tall;
+  g.save();
+  g.font = 'bold ' + px + 'px sans-serif'; g.textAlign = 'center'; g.direction = 'rtl';
+  g.fillStyle = light ? '#f4f1e6' : '#2b2825';
+  g.fillText('עומר', 0, y);
   g.restore();
 }
 // Everything on the river, furthest first, split by whether it's past the bridge yet.
