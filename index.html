@@ -3026,64 +3026,22 @@ function layout() {
   stage.style.visibility = 'visible';
 }
 
-// ---- the sky: follows the time of day (hourOfDay) from dawn through sunset to night ----
-const SKY_KEYS = [  // [hour, top, bottom, how dark the skyline is tinted]
-  [0, '#2b3350', '#47506c', 0.5], [4.5, '#2b3350', '#47506c', 0.5], [6, '#c9c3cf', '#f0cfa8', 0.12], [8, '#f4f3ef', '#e2e1dc', 0],
-  [16, '#f4f3ef', '#e2e1dc', 0], [17.5, '#e9d3c2', '#f4c58e', 0.06], [18.5, '#cf9a86', '#ee8f5a', 0.16],
-  [19.5, '#6b5f7e', '#c9805f', 0.34], [21, '#2b3350', '#47506c', 0.5], [24, '#2b3350', '#47506c', 0.5],
-];
+// ---- the sky: a plain grey sky with a grey sun that crosses it and sets as the day goes by ----
 const SUNRISE = 6, SUNSET = 18.5;
-function hexMix(a, b, t) {
-  const c = (h, i) => parseInt(h.slice(1 + i * 2, 3 + i * 2), 16);
-  return '#' + [0, 1, 2].map((i) => Math.round(lerp(c(a, i), c(b, i), t)).toString(16).padStart(2, '0')).join('');
-}
-function skyAt(hour) {
-  let i = 0;
-  while (i < SKY_KEYS.length - 2 && hour >= SKY_KEYS[i + 1][0]) i++;
-  const [h0, t0, b0, d0] = SKY_KEYS[i], [h1, t1, b1, d1] = SKY_KEYS[i + 1];
-  const k = clamp((hour - h0) / (h1 - h0), 0, 1);
-  return { top: hexMix(t0, t1, k), bottom: hexMix(b0, b1, k), dark: lerp(d0, d1, k) };
-}
-// Sun and moon each cross the sky in an arc and sink behind the skyline and the road.
-function skyBody(hour, rise, set) {
-  const f = (hour - rise) / (set - rise);
+// The sun arcs across the sky and sinks behind the skyline and the road; null while it's night.
+function sunAt(hour) {
+  const f = (hour - SUNRISE) / (SUNSET - SUNRISE);
   if (f < 0 || f > 1) return null;
-  return { x: lerp(140, 1460, f), y: ROAD_Y + 34 - Math.sin(f * Math.PI) * (ROAD_Y - 80), low: 1 - Math.sin(f * Math.PI) };
+  return { x: lerp(140, 1460, f), y: ROAD_Y + 34 - Math.sin(f * Math.PI) * (ROAD_Y - 80) };
 }
 function drawSky(g, hour) {
-  const c = skyAt(hour);
   const sky = g.createLinearGradient(0, 0, 0, ROAD_Y);
-  sky.addColorStop(0, c.top); sky.addColorStop(1, c.bottom);
+  sky.addColorStop(0, '#f4f3ef'); sky.addColorStop(1, '#e2e1dc');
   g.fillStyle = sky; g.fillRect(0, 0, W, ROAD_Y + 1);
-  const sun = skyBody(hour, SUNRISE, SUNSET);
+  const sun = sunAt(hour);
   if (!sun) return;
-  // low on the horizon the sun turns orange and swells, and the glow around it widens
-  const col = hexMix('#fff6d0', '#ff8a3c', Math.pow(sun.low, 1.6));
-  const r = 24 + 12 * sun.low;
-  const glow = g.createRadialGradient(sun.x, sun.y, r * 0.6, sun.x, sun.y, r * 5);
-  glow.addColorStop(0, col + 'aa'); glow.addColorStop(1, col + '00');
-  g.fillStyle = glow; g.fillRect(sun.x - r * 5, sun.y - r * 5, r * 10, r * 10);
-  circle(g, sun.x, sun.y, r); g.fillStyle = col; g.fill();
+  circle(g, sun.x, sun.y, 30); g.fillStyle = '#c4c3be'; g.fill();
 }
-// Dusk over the distant skyline and towers, then the stars and the moon on the dark sky.
-function drawDusk(g, hour) {
-  const c = skyAt(hour);
-  if (c.dark > 0) { g.fillStyle = `rgba(24,30,56,${c.dark})`; g.fillRect(0, 0, W, ROAD_Y); }
-  const night = clamp((c.dark - 0.3) / 0.2, 0, 1);
-  if (night <= 0) return;
-  g.save();
-  g.beginPath(); g.rect(0, 0, W, ROAD_Y); g.clip();
-  g.fillStyle = '#f4f1e6';
-  for (const [x, y, r, ph] of STARS) { g.globalAlpha = night * (0.55 + 0.45 * Math.sin(V.t * 1.5 + ph)); g.fillRect(x, y, r, r); }
-  g.globalAlpha = night;
-  const moon = skyBody((hour + 12) % 24, SUNRISE, SUNSET);
-  if (moon) {
-    circle(g, moon.x, moon.y, 17); g.fillStyle = '#f2efe0'; g.fill();
-    circle(g, moon.x + 7, moon.y - 3, 15); g.fillStyle = hexMix(hexMix(c.top, c.bottom, moon.y / ROAD_Y), '#181e38', c.dark); g.fill();
-  }
-  g.restore();
-}
-const STARS = (() => { const r = seeded(7); return Array.from({ length: 46 }, () => [r() * W, r() * (ROAD_Y - 90), 1 + r() * 1.6, r() * 6]); })();
 
 function render() {
   const g = ctx;
@@ -3095,7 +3053,6 @@ function render() {
   const hour = hourOfDay(S.elapsed, ERA, S.dayStartHour);
   drawSky(g, hour);
   g.drawImage(bgLayer, 0, 0, W, H);
-  drawDusk(g, hour);
   for (const o of vessels(false)) drawShip(g, o.sh, o.lat);
   drawWater(g);
   drawBridge(g, V.bridgeShown);
